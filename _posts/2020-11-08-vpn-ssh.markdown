@@ -4,7 +4,7 @@ title:  "Running a single SSH session over VPN"
 date:   2020-11-08 14:14:42 +0100
 categories: vpn woes
 ---
-## VPN sucks
+## Downsides of VPN
 
 Everybody who's worked remotely is probably familiar with VPNs. You run some application on your machine, such as Cisco AnyConnect or OpenConnect, which have you type in some credentials, some magic happens in the background, and suddenly you can reach some internal company servers.
 
@@ -13,7 +13,7 @@ You might also be familiar with the downsides of VPNs, such as:
 - Terrible slowdowns as a result of proxying all trafic through the VPN.
 - Or just the hassle of having to set up proxy configurations just so you can access the outside world.
 
-This seems dumb to me. I have a perfectly working network connection on my machine already that I use to access the internet when not connected to the VPN, so why can't I just use that to do all my normal network access, and only use the VPN connection for applications that absolutely need it (such as a single SSH session for example)? The answer is: it's possible, but doesn't seem well documented or supported.
+This seems dumb to me. I have a perfectly working network connection on my machine already that I use to access the internet when not connected to the VPN, so why can't I just use that to do all my normal network access, and only use the VPN connection for applications that absolutely need it (such as a single SSH session for example)? The answer is: it's possible, but doesn't seem well supported.
 
 ## How do VPNs work?
 
