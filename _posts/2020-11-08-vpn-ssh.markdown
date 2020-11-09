@@ -152,10 +152,10 @@ I'd like to be able to do something similar with FireFox, i.e. bind a single Fir
 
 Is this really such a weird idea? Why isn't this better supported? Or am I just doing something wrong?
 
-When looking things up on the internet one of the alternatives I've found is the suggestion to just add the relavant target addresses to my routing table myself. Accept, I have no idea what those addresses are. I'm not just accessing things on the VPN, I'm also accessing things that are only resolvable when connecting through the VPN, and I have no way of knowing the range of IP addresses that those things will occupy.
+When looking things up on the internet one of the alternatives I've found is the suggestion to just add the relavant target addresses to my routing table myself. Except, I have no idea what those addresses are. I'm not just accessing things on the VPN, I'm also accessing things that are only resolvable when connecting through the VPN, and I have no way of knowing the range of IP addresses that those things will occupy.
 
-It's also been suggested that this is such an uncommen case that better support for this is not needed. I strongly disagree. Especially with people working from home increasingly during the COVID-19 pandamic, VPN use (and thus mutliple network interfaces per device) has surely gone up significatnly?
+It's also been suggested that this is such an uncommen case that better support for this is not needed. I strongly disagree. Especially with people working from home increasingly during the COVID-19 pandamic, VPN use (and thus mutliple network interfaces per device) has surely gone up significantly?
 
 FireFox doesn't seem to support binding to a particular network interface, but maybe there are other browsers that do (I'm not hopeful though).
 
-At least I have gotten what I wanted working at least somewhat, though it annoyingly requires some mechanicle manual steps (still have to investigate some wrapper scripts).
+At least I have gotten what I wanted working at least somewhat, though it annoyingly requires some mechanical manual steps (still have to investigate some wrapper scripts).
