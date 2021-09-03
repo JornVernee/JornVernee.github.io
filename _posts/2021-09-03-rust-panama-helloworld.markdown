@@ -9,7 +9,7 @@ categories: rust panama-ffi
 In this example we will see how to:
 
 - build a simple rust library that exposes a C API (which the Panama FFI can link against).
-- use cbindgen to generate a C header file for this library.
+- use `cbindgen` to generate a C header file for this library.
 - use `jextract` to generate java bindings from the header file.
 - create a simple java program that invokes the rust library through the bindings.
 
@@ -36,7 +36,7 @@ The `#[no_mangle]` attribute is needed to make sure the function will be visible
 
 #### Step 3. Add the needed project config
 
-Go into Cargo.toml and add:
+Go into `Cargo.toml` and add the following:
 
 ```toml
 [build-dependencies]
@@ -50,7 +50,7 @@ crate_type = ["cdylib"]
 
 #### Step 4. Create a build script that invokes cbindgen
 
-Create a `build.rs` file in the top-level directory and add this:
+Create a `build.rs` file in the top-level directory and add the following:
 
 ```rust
 extern crate cbindgen;
@@ -69,7 +69,7 @@ fn main() {
 }
 ```
 
-This is simple build script that invokes cbindgen and writes the output to the `lib.h` file in the top-level directory.
+This is a simple build script that invokes cbindgen and writes the output to the `lib.h` file in the top-level directory.
 
 #### Step 5. Build the rust library & generate a C header file
 
