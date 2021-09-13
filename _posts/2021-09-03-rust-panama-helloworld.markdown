@@ -2,7 +2,7 @@
 layout: post
 title:  "Calling a rust library with the Panama FFI"
 date:   2021-09-03 15:25:42 +0200
-categories: rust panama-ffi
+categories: java panama rust panama-ffi
 ---
 ### Steps for setting up a "Hello, World!" example
 
