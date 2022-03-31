@@ -102,7 +102,7 @@ The JVM will derive the name of the function symbol it looks for from the packag
 
 For JNI a good way to make sure the name of the function in the native library is correct, is to regenerate the header file for the class with the method that fails to link (using `javac -h <path>`) and check to make sure that the function name in the header file matches the function name of the implementation (in the `.c/.cpp` file).
 
-Since the function name is derived from the package, class, and method name, moving the class to a different package, or renaming the package, class, or method, are all things that can make the name that the JVM expect go out of sync with the name of the function in the library.
+Since the function name is derived from the package, class, and method name, moving the class to a different package, or renaming the package, class, or method, are all things that can make the name that the JVM expects go out of sync with the name of the function in the library.
 
 ---
 
@@ -122,7 +122,13 @@ For JNI the `JNIEXPORT` macro can be used for this, which will do the right thin
 
 Checking that the function you're trying to call is exported becomes more important if you're working with the Foreign Linker API, since the function in the library is likely not declared with `JNIEXPORT`.
 
-There are several tools that can be used to check which symbols are exported from a library. On Windows, the `dumpbin` tool that comes with visual studio can be used with the `/EXPORTS <library file>` to print out exported symbols. The [Dependencies tool](https://github.com/lucasg/Dependencies), which also has a GUI, can also be used. On Linux the `nm` tool can be used to print out the symbols in a library. And I believe on Mac the `otool` tool can be used for the same (but I have no experience using the latter).
+#### Listing the functions in a native library
+
+There are several tools that can be used to check which functions are contained in a native library, which can be useful to debug one of the above problems.
+
+- On Windows, the `dumpbin` tool that comes with visual studio can be used with the `/EXPORTS <library file>` to print out exported symbols. The [Dependencies tool](https://github.com/lucasg/Dependencies), which also has a GUI, can also be used. 
+- On Linux the `nm` tool can be used to print out the symbols in a library.
+- On Mac, I believe `otool` can be used (but I have no experience using this).
 
 #### 3. The wrong library was loaded
 
