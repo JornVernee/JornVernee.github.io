@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Debugging native libary linkage errors"
-date:   2022-03-31 11:00:42 +0200
+date:   2021-09-13 16:00:42 +0200
 categories: java panama-ffi panama jni native
 ---
 
