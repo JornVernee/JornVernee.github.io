@@ -72,9 +72,6 @@ The second kind of linkage error you can commonly run into is thrown when a func
 For instance, if we extend the previous exmample program as follows:
 
 ```java
-import jdk.incubator.foreign.*;
-import java.util.Optional;
-
 public class Main {
     public static void main(String[] args) {
         System.loadLibrary("foo");
