@@ -93,7 +93,7 @@ Exception in thread "main" java.lang.UnsatisfiedLinkError: 'void Main.bar()'
         at Main.main(Main.java:6)
 ```
 
-This can have one of 2 causes:
+This can have one of 3 causes:
 
 1. The library that is being used does not contain the function symbol.
 2. The function is not exported.
