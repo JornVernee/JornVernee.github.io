@@ -95,8 +95,9 @@ Exception in thread "main" java.lang.UnsatisfiedLinkError: 'void Main.bar()'
 
 This can have one of 2 causes:
 
-1. The library that is being used does not contain the function symbol, or it is not exported.
-2. The wrong library is being loaded.
+1. The library that is being used does not contain the function symbol.
+2. The function is not exported.
+3. The wrong library is being loaded.
 
 #### 1. The library does not contain the function
 
@@ -116,7 +117,7 @@ Another way to check which symbol the JVM is looking for, is with the `-Xlog:lib
 
 These log messages can also be used to check the name of the function that the JVM is looking for.
 
----
+#### 2. The function is not exported
 
 A second reason why a function might not be found inside the library, even if the function name is correct, is because the function is not exported from the library. For instance on Windows, using the MSVC compiler, it is important to declare functions that need to be accessible from outside of the library with [`__declspec(dllexport)`](https://docs.microsoft.com/en-us/cpp/cpp/dllexport-dllimport?view=msvc-170).
 
@@ -126,7 +127,7 @@ Checking that the function you're trying to call is exported becomes more import
 
 There are several tools that can be used to check which symbols are exported from a library. On Windows, the `dumpbin` tool that comes with visual studio can be used with the `/EXPORTS <library file>` to print out exported symbols. The [Dependencies tool](https://github.com/lucasg/Dependencies), which also has a GUI, can also be used. On Linux the `nm` tool can be used to print out the symbols in a library. And I believe on Mac the `otool` tool can be used for the same (but I have no experience using the latter).
 
-#### 2. The wrong library was loaded.
+#### 3. The wrong library was loaded
 
 Finally, if a symbol can not be found inside a library, but the symbol name is correct, and it is exported from the library, it might be because the wrong library is being loaded.
 
