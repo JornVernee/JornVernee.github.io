@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "Debugging native libary linkage errors"
+title:  "Debugging native library linkage errors"
 date:   2021-09-13 16:00:42 +0200
 categories: java panama-ffi panama jni native
 ---
@@ -59,9 +59,9 @@ To see how library names are mapped on other platforms, or to see how a particul
 
 #### 2. The `java.library.path` system property is not set correctly
 
-The library path that was used to look up the libarry is printed in the exception message (`<list of paths>` above). It is a list of directories that was used to find the native library. One of those directories should contain the library you're trying to load.
+The library path that was used to look up the library is printed in the exception message (`<list of paths>` above). It is a list of directories that was used to find the native library. One of those directories should contain the library you're trying to load.
 
-If the library you're trying to load is located in another directory, you can set the `java.library.path` system property to the directory that contains your library using the `-Djava.library.path=/path/to/lib` VM argument, where multiple directories can be added seperated by `;` on Windows, and `:` on other platforms, e.g. `-Djava.library.path=/path1:/path2:/path3`.
+If the library you're trying to load is located in another directory, you can set the `java.library.path` system property to the directory that contains your library using the `-Djava.library.path=/path/to/lib` VM argument, where multiple directories can be added separated by `;` on Windows, and `:` on other platforms, e.g. `-Djava.library.path=/path1:/path2:/path3`.
 
 If the error keeps occurring, check the exception message. If it does not contain the library path you expected, you might be passing the command line option as a program argument instead of a VM argument by accident (VM arguments should be passed _before_ the main class), or it could be a problem with missing quotes in the shell you're using (e.g. `powershell` requires passing system properties in quotes, such as `'-Dmy.prop=val'` to avoid being picked up as other syntax).
 
@@ -69,7 +69,7 @@ If the error keeps occurring, check the exception message. If it does not contai
 
 The second kind of linkage error you can commonly run into is thrown when a function in a library can not be found.
 
-For instance, if we extend the previous exmample program as follows:
+For instance, if we extend the previous example program as follows:
 
 ```java
 public class Main {
@@ -138,9 +138,9 @@ Again the `-Xlog:library=info` VM flag comes to our rescue, because it also prin
 
 If the library you're trying to use is loaded, but the path in the loading message is not what you expected, it's likely that the wrong library file is being loaded.
 
-In the case that the same library is found multiple times on the `java.library.path` one solution is to remove the diretories with the incorrect library files from the `java.library.path`, or to remove those library files.
+In the case that the same library is found multiple times on the `java.library.path` one solution is to remove the directories with the incorrect library files from the `java.library.path`, or to remove those library files.
 
-If this is not practical because something else needs those library paths or files (such as the JVM itself, in the case it is a library bundled with the JVM), it might be possible to rename the libary you're trying to use instead, so that the name no longer conflicts with others.
+If this is not practical because something else needs those library paths or files (such as the JVM itself, in the case it is a library bundled with the JVM), it might be possible to rename the library you're trying to use instead, so that the name no longer conflicts with others.
 
 If both changing the library path, or changing the name of the library are not an option, then you could finally manually construct the absolute path of the library you're trying to use, and use [`System.load(String)`](https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/System.html#loadLibrary(java.lang.String)) to load the library directly.
 
