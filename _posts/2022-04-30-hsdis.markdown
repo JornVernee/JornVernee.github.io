@@ -5,7 +5,7 @@ date:   2022-04-30 14:14:42 +0100
 categories: hsdis
 ---
 
-Note: this post is a not very serious guide to building `hsdis` using a custom `cmake` build script, in order to avoid having to set up an environment for the openjdk build system on Windows (though I've also tested that the script works under WSL Linux). I like to play with `cmake` from time to time, and this post is about my experience with the little project of building `hsdis` with `cmake` (so, it's not a very serious guide. Though it should be good enough to get a working `hsdis` library too). The official instructions for building `hsdis` can be found in the openjdk repo here: [https://github.com/openjdk/jdk/tree/master/src/utils/hsdis](https://github.com/openjdk/jdk/tree/master/src/utils/hsdis).
+Note: this post is a not very serious guide to building `hsdis` using a custom `cmake` build script, in order to avoid having to set up an environment for the openjdk build system on Windows (though I've also tested that the script works under WSL Linux). I like to play with `cmake` from time to time, and this post is about my experience with the little project of building `hsdis` with `cmake` (so, it's not a very serious guide. Though it should be good enough to get a working `hsdis` library). The official instructions for building `hsdis` can be found in the openjdk repo here: [https://github.com/openjdk/jdk/tree/master/src/utils/hsdis](https://github.com/openjdk/jdk/tree/master/src/utils/hsdis).
 
 ## What is hsdis?
 
