@@ -133,6 +133,8 @@ java -Xbatch '-XX:-TieredCompilation' '-XX:CompileCommand=dontinline,Main::add*'
 - `'-XX:CompileCommand=PrintAssembly,Main::add*'` print out the assembly for the `add` method.
 - Note that I've also used to quotes `'` so that powershell doesn't try to interpret the arguments as script syntax.
 
+(Note that the `CompileCommand` option doesn't support `PrintAssembly` on JDK 8. In that case you'll have to use the top-level `-XX:+PrintAssembly` flag which will print out assembly for all compiled methods, instead of just the `add` method)
+
 And BOOM, assembly:
 
 ```text
