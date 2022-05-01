@@ -84,7 +84,7 @@ public class Main {
 }
 ```
 
-The class data is loaded through and `ldc` instruction (`mv.visitLdcInsn`), to which we pass a `ConstantDynamic` that represents our dynamic constant. This dynamic constant is set up to call the [`MethodHandles::classDataAt`](https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/invoke/MethodHandles.html#classDataAt(java.lang.invoke.MethodHandles.Lookup,java.lang.String,java.lang.Class,int)) method (`H_CLASS_DATA_AT`) as a bootstrap method, with a single bootstrap method argument, `0`.
+The class data is loaded through an `ldc` instruction (`mv.visitLdcInsn`), to which we pass a `ConstantDynamic` that represents our dynamic constant. This dynamic constant is set up to call the [`MethodHandles::classDataAt`](https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/invoke/MethodHandles.html#classDataAt(java.lang.invoke.MethodHandles.Lookup,java.lang.String,java.lang.Class,int)) method (`H_CLASS_DATA_AT`) as a bootstrap method, with a single bootstrap method argument, `0`.
 
 The first time this `ldc` instruction runs, the VM will call this bootstrap method, which will retrieve the object at index 0 of the list of class data which we use when we define the class below that (see the `defineHiddenClassWithClassData` line). The first three arguments to the bootstrap method, the method handle lookup, name, and type, are provided by the VM, and we provide the index of the object we want to load from the class data list as a constant argument. After resolution, the loaded object will be stored in the constant pool slot associated with the dynamic constant, so the next time it is loaded the resolution step will be skipped, and the stored object is loaded directly instead.
 
