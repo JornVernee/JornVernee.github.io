@@ -80,6 +80,8 @@ We also include the parent directory as an include directory with `target_includ
 
 Lastly, we set the `CAPSTONE_ARCH` and `CAPSTONE_MODE` preprocessor defines with `target_compile_definitions` which end up being passed to capstone at runtime.
 
+There is one more thing that needs to be done. The openjdk build system uses the `include/capstone` directory as include directory, instead of just `include`, which is what seems to be inteded ([looking for instance at the tests in the capstone repo itself](https://github.com/capstone-engine/capstone/blob/master/tests/test_arm.c)). So, to make the build above work, we also need to change the include directive in `hsdis-capstone.c` from `#include <capstone.h>` to `#include <capstone/capstone.h>`.
+
 Then, to build `hsdis` I use the following commands:
 
 ```sh
