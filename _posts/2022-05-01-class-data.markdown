@@ -57,7 +57,7 @@ public class Main {
         mv.visitLdcInsn(
             new ConstantDynamic(
                 ConstantDescs.DEFAULT_NAME, // mandated name
-                String.class.descriptorString(), // type of the constant
+                Object.class.descriptorString(), // type of the constant
                 H_CLASS_DATA_AT, // bootstrap method reference
                 0 // bootstrap method arg. The index of the class data object we want to load.
             )
@@ -67,14 +67,19 @@ public class Main {
         mv.visitEnd();
 
         byte[] bytes = cw.toByteArray();
-        List<?> data = List.of("Class data"); // index 0 = "Class data". That's what we load above
+        List<?> data = List.of(new Object() { // some arbitrary data
+            @Override
+            public String toString() {
+                return "Hello from custom object!";
+            }
+        });
         // define the class, with our class data
         MethodHandles.Lookup lookup = MethodHandles.lookup().defineHiddenClassWithClassData(bytes, data, true);
         // lookup the `getClassData` method we generated above
         MethodHandle MH_getClassData = lookup.findStatic(lookup.lookupClass(), "getClassData",
                                                          MethodType.methodType(Object.class));
         // invoke it to get our class data
-        System.out.println(MH_getClassData.invoke()); // prints out "Class data"
+        System.out.println(MH_getClassData.invoke()); // prints out "Hello from custom object!"
     }
 }
 ```
