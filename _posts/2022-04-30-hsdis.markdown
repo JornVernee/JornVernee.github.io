@@ -32,6 +32,7 @@ cmake_minimum_required(VERSION 3.15)
 project(hsdis)
 
 set(HSDIS_JDK_REF 3eb661bbe7151f3a7e949b6518f57896c2bd4136)
+set(HSDIS_CAPSTONE_REF 000561b4f74dc15bda9af9544fe714efda7a6e13)
 set(HSDIS_SOURCE_ROOT_URL https://raw.githubusercontent.com/openjdk/jdk/${HSDIS_JDK_REF}/src/utils/hsdis)
 
 file(DOWNLOAD
@@ -51,13 +52,13 @@ add_library(hsdis SHARED src/hsdis-capstone.c)
 
 include(FetchContent)
 
-message(STATUS "Fetching capstone (next)...")
+message(STATUS "Fetching capstone (ref=${HSDIS_CAPSTONE_REF})...")
 FetchContent_Declare(
     capstone
     GIT_REPOSITORY
         https://github.com/capstone-engine/capstone
     GIT_TAG
-        next
+        ${HSDIS_CAPSTONE_REF}
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON) # needed for linux
 set(CAPSTONE_ARCHITECTURE_DEFAULT OFF)
