@@ -83,7 +83,7 @@ The script will first download the 2 needed source files, `hsdis-capstone.c` and
 
 The script also patches the `hsdis-capstone.h` source file, since it uses a non-standard way of including `capstone.h` which is not compatible with the configuration in the capstone cmake package we're about the build.
 
-The script will then automatically fetch the capstone source repository (from the latest hash on the `next` branch at the time of writing branch) from github and build it, using the `FetchContent` functions.
+The script will then automatically fetch the capstone source repository (from the latest hash on the `next` branch at the time of writing) from github and build it, using the `FetchContent` functions.
 
 We link against capstone with `target_link_libraries`.
 
