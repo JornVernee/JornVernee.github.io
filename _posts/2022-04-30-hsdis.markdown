@@ -31,65 +31,87 @@ Create a new directory for the build, and in that directory, create a new file c
 cmake_minimum_required(VERSION 3.15)
 project(hsdis)
 
-set(HSDIS_JDK_REF 3eb661bbe7151f3a7e949b6518f57896c2bd4136)
-set(HSDIS_CAPSTONE_REF 000561b4f74dc15bda9af9544fe714efda7a6e13)
-set(HSDIS_SOURCE_ROOT_URL https://raw.githubusercontent.com/openjdk/jdk/${HSDIS_JDK_REF}/src/utils/hsdis)
+# options for users
+set(HSDIS_JDK_REF 3eb661bbe7151f3a7e949b6518f57896c2bd4136
+    CACHE STRING "git ref to download hsdis sources from")
+set(HSDIS_CAPSTONE_REF 000561b4f74dc15bda9af9544fe714efda7a6e13
+    CACHE STRING "git ref to fetch capstone from")
+set(HSDIS_ARCH X64
+    CACHE STRING "hsdis target architecture")
 
-file(DOWNLOAD
-     ${HSDIS_SOURCE_ROOT_URL}/capstone/hsdis-capstone.c
-     ${CMAKE_SOURCE_DIR}/src/hsdis-capstone.c)
+# internal settings
+set(CMAKE_POSITION_INDEPENDENT_CODE ON) # needed for linux
+ # turn off architecture support by default, to get a smaller capstone library
+set(CAPSTONE_ARCHITECTURE_DEFAULT OFF)
 
-# fixup capstone.h include
-file(READ src/hsdis-capstone.c FILE_CONTENTS)
-string(REPLACE "#include <capstone.h>" "#include <capstone/capstone.h>"  FILE_CONTENTS "${FILE_CONTENTS}")
-file(WRITE src/hsdis-capstone.c "${FILE_CONTENTS}")
-     
-file(DOWNLOAD
-     ${HSDIS_SOURCE_ROOT_URL}/hsdis.h
-     ${CMAKE_SOURCE_DIR}/src/hsdis.h)
+# set architecture specific options. Only x64 for now
+if(${HSDIS_ARCH} STREQUAL X64)
+    set(CAPSTONE_X86_SUPPORT ON)
+    set(HSDIS_CAPSTONE_ARCH CS_ARCH_X86)
+    set(HSDIS_CAPSTONE_MODE CS_MODE_64)
+    set(HSDIS_LIB_SUFFIX amd64)
+else()
+    message(FATAL_ERROR "Unknown architecture: ${HSDIS_ARCH}")
+endif()
 
-add_library(hsdis SHARED src/hsdis-capstone.c)
-
+# fetch and build capstone
 include(FetchContent)
-
 message(STATUS "Fetching capstone (ref=${HSDIS_CAPSTONE_REF})...")
 FetchContent_Declare(
     capstone
-    GIT_REPOSITORY
-        https://github.com/capstone-engine/capstone
-    GIT_TAG
-        ${HSDIS_CAPSTONE_REF}
-)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON) # needed for linux
-set(CAPSTONE_ARCHITECTURE_DEFAULT OFF)
-set(CAPSTONE_X86_SUPPORT ON)
+    GIT_REPOSITORY https://github.com/capstone-engine/capstone
+    GIT_TAG ${HSDIS_CAPSTONE_REF})
 FetchContent_MakeAvailable(capstone)
 
+# build hsdis
+# 1. download source files
+set(HSDIS_SOURCE_ROOT_URL
+    https://raw.githubusercontent.com/openjdk/jdk/${HSDIS_JDK_REF}/src/utils/hsdis)
+file(DOWNLOAD
+    ${HSDIS_SOURCE_ROOT_URL}/capstone/hsdis-capstone.c
+    ${CMAKE_SOURCE_DIR}/src/hsdis-capstone.c)
+file(DOWNLOAD
+    ${HSDIS_SOURCE_ROOT_URL}/hsdis.h
+    ${CMAKE_SOURCE_DIR}/src/hsdis.h)
+
+# 2. fixup capstone.h include
+file(READ src/hsdis-capstone.c FILE_CONTENTS)
+string(REPLACE "#include <capstone.h>" "#include <capstone/capstone.h>"
+       FILE_CONTENTS "${FILE_CONTENTS}")
+file(WRITE src/hsdis-capstone.c "${FILE_CONTENTS}")
+
+# 3. add hsdis shared library target
+add_library(hsdis SHARED src/hsdis-capstone.c)
+
+# 4. configure target
 target_link_libraries(hsdis PRIVATE capstone::capstone)
 target_include_directories(hsdis PUBLIC src)
 target_compile_definitions(hsdis
   PRIVATE 
-    CAPSTONE_ARCH=CS_ARCH_X86
-    CAPSTONE_MODE=CS_MODE_64)
-set_target_properties(hsdis PROPERTIES OUTPUT_NAME hsdis-amd64)
-set_target_properties(hsdis PROPERTIES PREFIX "")
+    CAPSTONE_ARCH=${HSDIS_CAPSTONE_ARCH}
+    CAPSTONE_MODE=${HSDIS_CAPSTONE_MODE})
+set_target_properties(hsdis
+  PROPERTIES
+    OUTPUT_NAME hsdis-${HSDIS_LIB_SUFFIX}
+    PREFIX "")
 
+# 5. generate install target
 install(TARGETS hsdis)
 ```
 
-At this point it's important to note that this build script is for building `hsdis` for the x86_64 architecture. We only enable x86 support in capstone with the `CAPSTONE_X86_SUPPORT` flag, and the `-amd64` suffix of the library name is what HotSpot will look for on x64 systems.
+At this point it's important to note that this build script is for building `hsdis` for the x86_64 architecture. I've added a flag to set the architecture, but it will currently fail when set to anything other than `X64`, which is the default.
 
-The script will first download the 2 needed source files, `hsdis-capstone.c` and `hsdis.h`, from github. The ref that's used is defined by `HSDIS_JDK_REF`. I've used the latest hash at the time of writing, which works. You could try changing this to `master` to get the latest source code as well (but I can't guarantee it will work).
+After initializing some variables, the script will first fetch the capstone source repository (from the latest hash on the `next` branch at the time of writing) from github and build it, using the `FetchContent` functions.
+
+The script will then download the 2 needed source files, `hsdis-capstone.c` and `hsdis.h`, from github. The ref that's used is defined by `HSDIS_JDK_REF`. I've used the latest hash at the time of writing, which works. You could try changing this to `master` to get the latest source code as well (but I can't guarantee it will work).
 
 The script also patches the `hsdis-capstone.h` source file, since it uses a non-standard way of including `capstone.h` which is not compatible with the configuration in the capstone cmake package we're about the build.
 
-The script will then automatically fetch the capstone source repository (from the latest hash on the `next` branch at the time of writing) from github and build it, using the `FetchContent` functions.
-
 We link against capstone with `target_link_libraries`.
 
-We also include the parent directory as an include directory with `target_include_directories`, since it contains the `hsdis.h` header file.
+We also include the `src` directory as an include directory with `target_include_directories`, since it contains the `hsdis.h` header file.
 
-Lastly, we set the `CAPSTONE_ARCH` and `CAPSTONE_MODE` preprocessor defines with `target_compile_definitions` which end up being passed to capstone at runtime.
+Lastly, we set the `CAPSTONE_ARCH` and `CAPSTONE_MODE` preprocessor defines with `target_compile_definitions`. These are the names of capstone enum constants which end up being passed to capstone at runtime.
 
 Then, to build `hsdis` I use the following commands:
 
