@@ -5,14 +5,17 @@ date:   2021-09-13 16:00:42 +0200
 categories: java panama-ffi panama jni native
 ---
 
-When using native libraries in Java, you'll sooner or later run into linkage errors. In this blog I will go over the two most common cases in which this error can occur:
+When using native libraries in Java, you'll sooner or later run into linkage errors. In this blog I will go over the most common cases in which linkage errors can occur.
 
-- When loading a library.
-- When looking up a symbol in the library.
+1. [Linkage error when loading a library](#1-linkage-error-when-trying-to-load-a-library) \
+    1a. [The incorrect library name is being used](#1a-the-incorrect-library-name-is-being-used) \
+    1b. [The `java.library.path` system property is not set correctly](#1b-the-javalibrarypath-system-property-is-not-set-correctly)
+2. [Linkage error when looking up a symbol in the library](#2-linkage-error-when-looking-up-a-symbol) \
+    2a. [The library does not contain the function](#2a-the-library-does-not-contain-the-function) \
+    2b. [The function is not exported](#2b-the-function-is-not-exported) \
+    2c. [The wrong library was loaded](#2c-the-wrong-library-was-loaded)
 
-I will discuss possible causes and give some tips for debugging.
-
-### Linkage error when trying to load a library
+### 1. Linkage error when trying to load a library
 
 The first kind of linkage error we will look at typically manifests itself as an [`UnsatisfiedLinkError`](https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/UnsatisfiedLinkError.html). You might commonly encounter this error when calling [`System.loadLibrary(String)`](https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/System.html#loadLibrary(java.lang.String)), such as:
 
@@ -39,7 +42,7 @@ This error typically means one of two things:
 1. An incorrect library name is being used.
 2. The `java.library.path` system property is not set correctly.
 
-#### 1. The incorrect library name is being used
+#### 1a. The incorrect library name is being used
 
 When calling `System.loadLibrary(String)` the name of the library that is passed as an argument will be mapped into a file name in a platform-specific manner, and then loaded.
 
@@ -55,9 +58,9 @@ So, for instance to load a library file called `libfoo.so` on Linux, you would h
 System.loadLibrary("foo");
 ```
 
-To see how library names are mapped on other platforms, or to see how a particular library name is mapped to a file name, you can call [`System.mapLibraryName(String)`](https://docs.oracle.com/en/java/javase/18/docs/api/java.base/java/lang/System.html#mapLibraryName(java.lang.String)).
+To see how library names are mapped on other platforms, or to see how a particular library name is mapped to a file name, you can call [`System.mapLibraryName(String)`](https://docs.oracle.com/en/java/javase/20/docs/api/java.base/java/lang/System.html#mapLibraryName(java.lang.String)).
 
-#### 2. The `java.library.path` system property is not set correctly
+#### 1b. The `java.library.path` system property is not set correctly
 
 The library path that was used to look up the library is printed in the exception message (`<list of paths>` above). It is a list of directories that was used to find the native library. One of those directories should contain the library you're trying to load.
 
@@ -65,7 +68,7 @@ If the library you're trying to load is located in another directory, you can se
 
 If the error keeps occurring, check the exception message. If it does not contain the library path you expected, you might be passing the command line option as a program argument instead of a VM argument by accident (VM arguments should be passed _before_ the main class), or it could be a problem with missing quotes in the shell you're using (e.g. `powershell` requires passing system properties in quotes, such as `'-Dmy.prop=val'` to avoid being picked up as other syntax).
 
-### Linkage error when looking up a symbol
+### 2. Linkage error when looking up a symbol
 
 The second kind of linkage error you can commonly run into is thrown when a function in a library can not be found.
 
@@ -96,7 +99,7 @@ This can have one of 3 causes:
 2. The function is not exported.
 3. The wrong library is being loaded.
 
-#### 1. The library does not contain the function
+#### 2a. The library does not contain the function
 
 The JVM will derive the name of the function symbol it looks for from the package, class, and method name. The format it will have is roughly like `Java_my_package_MyClass_myMethod`. Another thing to note is that underscores in any of the Java names will be translated into the symbol name as `_1`.
 
@@ -114,7 +117,7 @@ Another way to check which symbol the JVM is looking for, is with the `-Xlog:lib
 
 These log messages can also be used to check the name of the function that the JVM is looking for.
 
-#### 2. The function is not exported
+#### 2b. The function is not exported
 
 A second reason why a function might not be found inside the library, even if the function name is correct, is because the function is not exported from the library. For instance on Windows, using the MSVC compiler, it is important to declare functions that need to be accessible from outside of the library with [`__declspec(dllexport)`](https://docs.microsoft.com/en-us/cpp/cpp/dllexport-dllimport?view=msvc-170).
 
@@ -130,7 +133,7 @@ There are several tools that can be used to check which functions are contained 
 - On Linux the `nm` tool can be used to print out the symbols in a library.
 - On Mac, I believe `otool` can be used (but I have no experience using this).
 
-#### 3. The wrong library was loaded
+#### 2c. The wrong library was loaded
 
 Finally, if a symbol can not be found inside a library, but the symbol name is correct, and it is exported from the library, it might be because the wrong library is being loaded.
 
