@@ -14,15 +14,16 @@ Understanding what the JIT compilers do is important when trying to understand t
 program. In this blog post I will discuss several techniques that I use to do this. I will cover getting basic traces for
 a particular compilation, as well as actual debugging using a debugger tool.
 
-Note that I will be focussed on the HotSpot JVM particulars, and will _not_ be explaining how to read assembly code, or
+Note that I will be focussing on the HotSpot JVM particulars, and will _not_ be explaining how to read assembly code, or
 how certain optimizations work, other than a brief description. If you wish to know more about a certain topic, you'll 
 have to research it yourself. But, maybe this blog post can give a few ideas on where to start.
 
 1. [Setting the stage](#1-setting-the-stage)
 2. [Getting the assembly of a compiled method](#2-getting-the-assembly-of-a-compiled-method)
-3. [Getting inlining traces](#3-getting-inlining-traces)
+3. [Printing inlining traces](#3-printing-inlining-traces)
 4. [A closer look at compile commands](#4-a-closer-look-at-compile-commands)
 5. [Tracking down escaping objects](#5-tracking-down-escaping-objects)
+6. [Debugging compilation using a native debugger](#6-debugging-compilation-using-a-native-debugger)
 
 ## 1. Setting the stage
 
@@ -284,7 +285,7 @@ build, I recommend using at least that when printing assembly. The most straight
 is building the JDK yourself. This is relatively easy, if you follow the steps in the [build guide](https://github.com/openjdk/jdk/blob/master/doc/building.md).
 For a fastdebug build, just make sure to configure the build with `--with-debug-level=fastdebug`.
 
-## 3. Getting inlining traces
+## 3. Printing inlining traces
 
 The next useful bit of information we can get from a JIT compiler is an inlining trace. This trace indicates whether 
 methods being called by the compiled Java code were inlined. Inlining is an important optimization that allows other
@@ -539,16 +540,57 @@ JavaObject(10) allocation in: TestJIT$Scope::<init> @ bci:5 (line 20)
 A nice summary of the escaping allocations (if I do say so myself ;)). Again, we can see here that there are 2 escaping
 allocations which are both escaping through a call to `TestJIT$Scope::close`.
 
-Now, for the reason why this out of line call is here, we can generate an inlining trace, as shown in [section 3](#3-getting-inlining-traces).
-If we look for `TestJIT$Scope::close`, what we find is this:
+Now, for the reason why this out of line call is here, we can generate an inlining trace, as shown in [section 3](#3-printing-inlining-traces).
+If we look for `TestJIT$Scope::close` in the trace, we find this:
 
 ```text
                             @ 25   TestJIT$Scope::close (39 bytes)   already compiled into a medium method
 ```
 
 Unfortunately, `TestJIT$Scope::close` is not being inlined, which makes our objects escape. Actually, we've just diagnosed
-https://bugs.openjdk.org/browse/JDK-8267532 which currently doesn't have a solution yet.
+https://bugs.openjdk.org/browse/JDK-8267532 which doesn't have a solution as of the time of writing. But, we now at least
+know the reason _why_ the objects are escaping. In other cases this might be a more useful tool to track down a problematic
+piece of code in order to apply a spot fix. But, unfortunately when dealing with performance, there is not always a pot
+of gold at the end of the rainbow.
 
 # 6. Debugging compilation using a native debugger
+
+Finally, let's bust out the ultimate escape hatch: debugging the source code directly during a compilation. Stepping through
+the source code with a debugger is the ultimate tool for inspecting what a JIT compiler is doing, when all else falls short.
+For this, we need a 'slowdebug' build (obtained in a similar way to a fastdebug build). This is needed so that the VM is
+actually debugable without too many issues using a native debugging tool.
+
+To set up debugging of the VM, I first set up a VSCode project by running `make vscode-project` in the JDK build system.
+That should generate a `./build/<config>/jdk.code-workspace` file which I can open in VSCode through
+`File -> Open Workspace from File...`.
+
+Next, I add these 2 lines of code to the start of the `main` method in our test program:
+
+```java
+System.out.println("pid: " + ProcessHandle.current().pid());
+System.in.read();
+```
+
+I print out the current process id, and then 'wait' by reading from stdin.
+
+Next, I add the `-XX:CompileCommand=BreakAtCompile,TestJIT::payload,true` command line flag, which will stop the native 
+debugger during the compilation of the payload method. If I run the program, I will see the pid printed on the console.
+At this point I can attach a debugger through VSCode. I go to the 'Run and Debug' tab, and click the little gear in the
+top left-ish of the window. This should open a .json file with several run/debug configurations. There should be a
+'Add Configuration...' in the bottom right, through which I can add a configuration for the debugger I want to use.
+I'm using the `C/C++: (Windows) Attach` configuration which comes from the `C/C++` VSCode plugin. Adding the run configuration
+is only needed once, after which I can just click the little green arrow in the top left with the '(Windows) Attach' run
+configuration selected.
+
+After attaching the native debugger, and pressing 'enter' in the test program terminal to make it continue execution, the
+VSCode window pops back up and throws me somewhere into the HotSpot compiler code. At this point I can set other breakpoints
+in the compiler code, and begin debugging the compilation of the payload method.
+
+That should give you a basic idea on how to debug a compilation with a native debugger.
+
+## Conclusion
+
+That's all I have for now. Hopefully showing some of the debugging techniques I use gave you some starting points for
+debugging HotSpot's JIT compilers yourself.
 
 ## Thanks for reading
