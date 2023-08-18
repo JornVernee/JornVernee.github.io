@@ -1,8 +1,8 @@
 ---
 layout: post
-title:  "Debugging Java JIT compilation"
+title:  "Notes on debugging HotSpot's JIT compilation"
 date:   2023-08-18 14:14:42 +0100
-categories: jit debugging
+categories: hotspot jit
 ---
 
 Typically when you compile a Java program, it is first compiled into bytecode by a Java compiler. However, this bytecode
@@ -11,12 +11,9 @@ compiler. This way of doing things allows the JIT to take maximum advantage of t
 in, such as hardware, and even to a certain degree the specific data that is fed into the program.
 
 Understanding what the JIT compilers do is important when trying to understand the performance characteristics of a Java
-program. In this blog post I will discuss several techniques that I use to do this. I will cover getting basic traces for
-a particular compilation, as well as actual debugging using a debugger tool.
-
-Note that I will be focussing on the HotSpot JVM particulars, and will _not_ be explaining how to read assembly code, or
-how certain optimizations work, other than a brief description. If you wish to know more about a certain topic, you'll 
-have to research it yourself. But, maybe this blog post can give a few ideas on where to start.
+program. In this blog post I will show off several techniques that I use to debug what a JIT compiler is doing. This is
+not a post focussed on beginners. Though, it might give some inspiration to a beginner for things they might want to
+learn about. If you wish to know more about a certain topic, you'll have to research it yourself.
 
 1. [Setting the stage](#1-setting-the-stage)
 2. [Getting the assembly of a compiled method](#2-getting-the-assembly-of-a-compiled-method)
@@ -28,7 +25,7 @@ have to research it yourself. But, maybe this blog post can give a few ideas on 
 ## 1. Setting the stage
 
 First, let's set up a small test project that we can easily modify to test different snippets of Java code. Our goal
-is for to be able to trigger a JIT compilation for a particular piece of Java code, so that we can use some of
+is to be able to trigger a JIT compilation for a particular piece of Java code, so that we can use some of
 HotSpot's options for debugging the compilation.
 
 I define a 'payload' method, which will hold the code that we wish to JIT compile. Then, we trigger the JIT compilation
@@ -49,20 +46,21 @@ public class TestJIT {
 ```
 
 Tier 4 JIT compilation, done by the C2 JIT compiler, which is the highest/most optimized tier, happens after 10K
-invocations on x86. The number can be found in the `./src/hotspot/cpu/x86/c2_globals.hpp` file as `CompileThreshold`
-[1](https://github.com/openjdk/jdk/blob/752121114f424d8e673ee8b7bb85f7705a82b9cc/src/hotspot/cpu/x86/c1_globals_x86.hpp#L41).
-I'm invoking the payload 20K times here to be on the safe side, since the invocation counter is not necessarily 100% accurate.
+invocations on x64. The number can be found in the `./src/hotspot/cpu/x86/c2_globals.hpp` file as `CompileThreshold`
+[1](https://github.com/openjdk/jdk/blob/752121114f424d8e673ee8b7bb85f7705a82b9cc/src/hotspot/cpu/x86/c2_globals_x86.hpp#L41).
+It is also a VM flag, so the threshold can be configured from the command line as well. I'm invoking the payload 20K
+times here to be on the safe side, since the invocation counter is not necessarily 100% accurate.
 
-I just compile the program with `javac`. Then, when running it, there are a few important flags to pass. First:
-`-XX:CompileCommand=dontinline,TestJIT::payload`. This flag disables inlining of the `payload`. Doing this is important
+I just compile the program to bytecode with `javac`. Then, when running it, there are a few important flags to pass. First:
+`-XX:CompileCommand=dontinline,TestJIT::payload`. This flag disables inlining of `payload`. Doing this is important
 in order to get a standalone compilation of the `payload` method, which is required to be able to inspect the compilation
 of that particular method in isolation from the loop in `main`.
 
-The other important flag we need to pass is `-Xbatch`. JIT compilation is by default done on a background thread. This
+The other important flag we need to pass is `-Xbatch`. JIT compilation is by default done in a background thread. This
 means that your code can just keep running while the compilation happens, but in our case it also means that the code
-might finish running before the compilation is done, meaning we would not be able to debug it. `-Xbatch` makes it so the
-thread that requests a compilation is stopped while the compilation is happening. FWIW, `-Xbatch` is an alias for
-`-XX:-BackgroundCompilation`, i.e. turning off background compilation [2](https://github.com/openjdk/jdk/blob/752121114f424d8e673ee8b7bb85f7705a82b9cc/src/hotspot/share/runtime/globals.hpp#L272-L274)
+might finish running before the compilation is done, meaning we would not be able to debug the compilation. `-Xbatch`
+makes it so the thread that requests a compilation is stopped while the compilation is happening. FWIW, `-Xbatch` is an
+alias for `-XX:-BackgroundCompilation`, i.e. turning off background compilation [2](https://github.com/openjdk/jdk/blob/752121114f424d8e673ee8b7bb85f7705a82b9cc/src/hotspot/share/runtime/globals.hpp#L272-L274)
 
 If you run the test program with these 2 flags (and any other needed flags), the output is not very interesting yet:
 
@@ -71,17 +69,17 @@ If you run the test program with these 2 flags (and any other needed flags), the
 CompileCommand: dontinline TestJIT.payload bool dontinline = true
 ```
 
-Next, let's see how we can start using this test setup to get interesting information out the compilation of the payload
+Next, let's see how we can start using this test setup to get interesting information out of the compilation of the payload
 method.
 
 ## 2. Getting the assembly of a compiled method
 
 The JIT compilers output machine code, which is, let's say, a hard to read format. Luckily this machine code can be
-dis-assembled into a more readable format where each CPU instruction is represented with a mnemonic. To do that, a dis-
-assembler plugin for HotSpot is needed called `hsdis`. You can find instructions on how to build hdis through the [OpenJDK
-build instructions](https://github.com/openjdk/jdk/blob/master/src/utils/hsdis/README.md), or through my [earlier post on
+dis-assembled into a more readable format where each CPU instruction is represented with a mnemonic. To do that, a
+dis-assembler plugin for HotSpot is needed called `hsdis`. You can find instructions on how to build hdis through the [OpenJDK
+build instructions](https://github.com/openjdk/jdk/blob/master/src/utils/hsdis/README.md), or through my [previous post on
 the topic]({% post_url 2022-04-30-hsdis %}). I recommend using the capstone-based hsdis, as it's easiest to build,
-and also what I'm using. I've put the hsdis library file on the `PATH`, where it is findable by HotSpot.
+and also what I'm using. I've put the hsdis library file on the `PATH`, where it can be loaded automatically by HotSpot.
 
 Now we just run the program again with a couple of additional VM flags to print out the assembly of the `payload` method.
 I'm using `-XX:CompileCommand=print,TestJIT::payload` to print out the assembly, and I'm also adding `-XX:-TieredCompilation`
@@ -107,8 +105,8 @@ java `
 Note that I'm using powershell. The ticks are the powershell equivalent of `\` in a unix shell. I've put this command
 in a script file to make it easier to edit and re-run.
 
-The output generated is architecture specific. I'm using an x64 machine, which gives me x64 assembly. If you are using an
-AArch64 machine, such as Apple's M1 chips, the output will be different. The output I get for my test program above as follows:
+The generated output is architecture specific. I'm using an x64 machine, which gives me x64 assembly. If you are using an
+AArch64 machine, such as Apple's M1, the output will be different. The output I get for my test program above as follows:
 
 ```text
 CompileCommand: dontinline TestJIT.payload bool dontinline = true
@@ -171,35 +169,31 @@ Compiled method (c2)      54   13             TestJIT::payload (1 bytes)
 The thing to focus on is the `[Disassembly]` section of the output. Even though our `payload` method is empty, there is
 still quite a bit of code generated by the JIT. We are of course running in a virtual machine, and there is some additional
 code needed to make it work. If we're just interested in the assembly generated for the contents of the `payload`
-method, then all of the above is irrelevant. After all, the `payload` method is empty, so the above code is purely auxiliary
-code. However, I will walk through it once so that we know which parts we can typically ignore:
-
-Setting up the stack frame. Allocates a bit of memory on the thread's stack, and saves the contents of the `rbp` register
-to the stack.
+method, then most of the above is irrelevant. However, I will walk through it once so that we know which parts we can
+typically ignore:
 
 ```text
 0x000001c6bacb0c00:   sub             rsp, 0x18
 0x000001c6bacb0c07:   mov             qword ptr [rsp + 0x10], rbp
 ```
 
-NMethod entry barrier. 'nmethod' is the name for a compiled Java method in HotSpot. The nmethod entry barrier is need to
-make some GCs work. I won't get into that right now:
+Setting up the stack frame. Allocates a bit of memory on the thread's stack, and saves the contents of the `rbp` register
+to the stack.
 
 ```text
 0x000001c6bacb0c0c:   cmp             dword ptr [r15 + 0x20], 0
 0x000001c6bacb0c14:   jne             0x1c6bacb0c43
 ```
 
-Cleaning up the frame:
+NMethod entry barrier. 'nmethod' is the name for a compiled Java method in HotSpot. The nmethod entry barrier is needed
+to make some GCs work. I won't get into that right now.
 
 ```text
 0x000001c6bacb0c1a:   add             rsp, 0x10
 0x000001c6bacb0c1e:   pop             rbp
 ```
 
-Safepoint poll. The VM needs threads to occasionally poll for safe points. At a safe point, the JVM state for the current
-thread is fully known and recoverable. This is a point in the code where the VM might want to inspect the thread to do
-various VM operations.
+Cleaning up the frame.
 
 ```text
 0x000001c6bacb0c1f:   cmp             rsp, qword ptr [r15 + 0x378]
@@ -207,11 +201,15 @@ various VM operations.
 0x000001c6bacb0c26:   ja              0x1c6bacb0c2d
 ```
 
-Return instruction:
+Safepoint poll. The VM needs threads to occasionally poll for safe points. At a safe point, the JVM state for the current
+thread is fully known and recoverable. This is a point in the code where the VM might want to inspect the thread to do
+various VM operations.
 
 ```text
 0x000001c6bacb0c2c:   ret
 ```
+
+Return instruction
 
 I'm going to ignore the rest for now. The important part is that the code for the contents of the `payload` method will
 be primarily found in this block, between the nmethod entry barrier and the cleanup of the frame. A good strategy when trying
@@ -275,8 +273,8 @@ The assembly for the code `return a + b;` can be found between the nmethod entry
 A clever way of adding two values together in a single instruction, and storing the result in the `eax` register, which
 is the register in which integer values are returned in the Java compiled calling convention.
 
-And that's really all there is to it! Now you should have to basic skills needed to start analysing the machine code
-generated by the JIT compilers for a particular snippet of Java code.
+That should give you a basic idea of what is needed to start analysing the code generated by the JIT compilers for a
+particular snippet of Java code.
 
 A thing to note here is that this assembly was generated with a release build, i.e. the ones that you can download from
 [jdk.java.net](https://jdk.java.net/). There are also 'fastdebug' and 'slowdebug' versions of HotSpot. Using a debug build
@@ -310,7 +308,7 @@ public static int payload() {
 ```
 
 We can generate an inlining trace for this compilation using another `CompileCommand` option. Instead of using 
-`-XX:CompileCommand=print,TestJIT::payload` to print the assembly, I'm going to change the `print` command in that flag
+`-XX:CompileCommand=print,TestJIT::payload` to print the assembly, I'm going to change the `print` option in that flag
 to `PrintInlining`, which will give us an inlining trace: `-XX:CompileCommand=PrintInlining,TestJIT::payload`. The output
 I get is simply:
 
@@ -321,13 +319,14 @@ I get is simply:
 
 The format of an inlining trace is not really documented, unfortunately. The best source of information to understanding
 it is the source code found in [`CompileTask::print_inlining_inner`](https://github.com/openjdk/jdk/blob/bcba5e97857fd57ea4571341ad40194bb823cd0b/src/hotspot/share/compiler/compileTask.cpp#L412). Each line in the inlining trace will indicate a method that was either inlined successfully,
-or a method which failed to be inlined. Currently this is not indicated very well (something I'm hoping to change in the future),
-and we have to interpret the message at the end of the line to decide whether inlining succeeded or failed. In this case,
-the message is `inline (hot)`, from which we can ascertain that inlining succeeded. The line also lists the name of the
-method which was inlined, and the bytecode location at which the method call is located in the caller method. In this case,
-the call to `otherMethod` in `payload` is located at bci (byte code index) `0`, and the `yetAnotherMethod` method call in
-`otherMethod` is also located at bci `0`. The indentation of the lines indicates the 'level' of inlining that occurred.
-Since the `yetAnotherMethod` method is inlined transitively through `otherMethod`, its line indented by 2 extra spaces.
+or a method which failed to be inlined. Currently the difference between success and failure is not indicated very well
+(something I'm hoping to change in the future), and we have to interpret the message at the end of the line to decide
+whether inlining succeeded or failed. In this case, the message is `inline (hot)`, from which we can ascertain that
+inlining succeeded. The line also lists the name of the method which was inlined, and the bytecode location at which the
+method call is located in the caller method. In this case, the call to `otherMethod` in `payload` is located at bci
+(byte code index) `0`, and the `yetAnotherMethod` method call in `otherMethod` is also located at bci `0`. The
+indentation of the lines indicates the 'level' of inlining that occurred. Since the `yetAnotherMethod` method is inlined
+transitively through `otherMethod`, its line indented by 2 extra spaces.
 
 Let's see what happens if we disable inlining of `otherMethod` using the `-XX:CompileCommand=dontinline,TestJIT::otherMethod`
 flag. Now the inlining trace looks like this:
@@ -340,7 +339,7 @@ That should cover the basics of inlining traces.
 
 ## 4. A closer look at compile commands
 
-By now you've probably noticed how useful the `-XX:CompileCommand=...` option is. This command use used to control compiler
+By now you've probably noticed how useful the `-XX:CompileCommand=...` option is. This command is used to control compiler
 settings on a per-method basis. To get more information about the `CompileCommand` flag, we can use:
 
 ```powershell
@@ -352,14 +351,12 @@ find the `CompileCommand` help message. This describes the syntax of the flag, a
 used in combination with the flag. A lot of the flags are also listed in the [`./src/hotspot/share/compiler/compilerDirectives.hpp` file](https://github.com/openjdk/jdk/blob/bcba5e97857fd57ea4571341ad40194bb823cd0b/src/hotspot/share/compiler/compilerDirectives.hpp).
 
 Besides specifying these compile commands on the command line, it's also possible to specify them through a json file,
-which gives slightly more flexibility on which compiler the option applies to. More information about that can be found
-in the JEP: https://openjdk.org/jeps/165
+which gives slightly more flexibility wrt. which compiler the option applies to. More information about that can be found
+in [the JEP](https://openjdk.org/jeps/165)
 
-If you look at the compilerDirective file, you might notice that some options are only available in non-product builds.
-For the next section on escape analysis, I'm going to use such a non-product build, in particular a 'fastdebug' build of
-HotSpot.
+If you look at the compilerDirectives file, you might notice that some options are only available in non-product builds.
 
-# 5. Tracking down escaping objects
+## 5. Tracking down escaping objects
 
 For this section, I'm going to be using a 'fastdebug' build of HotSpot. You will not be able to use a release build if you
 wish to follow along.
@@ -404,7 +401,7 @@ still seeing allocations? To investigate this we are going to use the `TraceEsca
 available in release builds). This command prints a trace of the escape analysis algorithm, which we can use to track down
 which objects escape, and why.
 
-Let's start by modifying our payload to include the code in the benchmark:
+Let's start by modifying our payload to include the code from the benchmark:
 
 ```java
  public void payload() {
@@ -431,8 +428,8 @@ static class Scope implements AutoCloseable {
 }
 ```
 
-Note that I've turned the payload method into an instance method, to make that work I'm simply create an instance of the
-TestJIT class and invoking payload on that:
+Note that I've turned the payload method into an instance method, to make that work I'm simply creating an instance of the
+TestJIT class and invoking the payload method on that:
 
 ```java
 TestJIT recv = new TestJIT();
@@ -441,18 +438,17 @@ for (int i = 0; i < 20_000; i++) {
 }
 ```
 
-To get an escape analysis trace, I just change the `PrintInlining` compile command to `TraceEscapeAnalysis` in the base command:
-`-XX:CompileCommand=TraceEscapeAnalysis,TestJIT::payload`. I also pipe the output to a file `... > EA.txt`, since it's so
-long.
+To get an escape analysis trace, I change the `PrintInlining` option to `TraceEscapeAnalysis` in the base command:
+`-XX:CompileCommand=TraceEscapeAnalysis,TestJIT::payload`. I also pipe the output to a file `... > EA.txt`, since it's
+quite long.
 
-The output I get is... quite long, and I wont include it in full here. The important things to look for are the line like
-this:
+The output I get is long, and I wont include it in full here. The important thing to look for are the lines like this:
 
 ```text
 +++++ Initial worklist for virtual void TestJIT.payload() (ea_inv=0)
 ```
 
-Notice the `ea_inv=0` at the end. Escape analysis can run for multiple iterations. To find escape objects however, only
+Notice the `ea_inv=0` at the end. Escape analysis can run for multiple iterations. To find escaping objects however, only
 the last iteration is relevant. So, I just search for `ea_inv`, and find the last iteration which is `ea_inv=1`, and delete
 the rest of the trace before that.
 
@@ -472,7 +468,7 @@ JavaObject(9) NoEscape(NoEscape) [ [ 37 ]]     25  Allocate  === 5 6 7 8 1 (23 2
 JavaObject(10) NoEscape(NoEscape) [ [ 102 ]]     90  Allocate  === 39 36 63 8 1 (88 87 22 1 1 10 1 1 1 42 1 42 ) [[ 91 92 93 100 101 102 ]]  rawptr:NotNull ( int:>=0, java/lang/Object:NotNull *, bool, top, bool ) TestJIT$Scope::<init> @ bci:5 (line 20) TestJIT::payload @ bci:4 (line 12) !jvms: TestJIT$Scope::<init> @ bci:5 (line 20) TestJIT::payload @ bci:4 (line 12)
 ```
 
-These allocations start out as non-escaping, but at some point they might escape during the following computation. In the 
+These allocations start out as non-escaping, but at some point they are discovered to escape during the following escape analysis. In the 
 debug string for the Allocate node, we can see where the allocation is happening in the code: `TestJIT::payload @ bci:0 (line 12)`
 and `TestJIT$Scope::<init> @ bci:5 (line 20)`. So we have 2 allocations, one in the payload method on line 12, and one in
 the constructor of `Scope` on line 20. These are the lines:
@@ -489,17 +485,18 @@ final List<Runnable> resources = new ArrayList<>();
 
 Exactly where we are using the `new` operator!
 
-Now, let's try and find where these objects are escaping. I'll start by searching for `JavaObject(9)` in the calculating
-escape states messages. I find this (I've omitted some of the end of the output which is not relevant):
+Now, let's try and find why these objects are escaping. I'll start by searching for `JavaObject(9)` in the 'calculating
+escape states ...' messages. I find this:
 
 ```text
 JavaObject(9) NoEscape(NoEscape) -> NoEscape(GlobalEscape) propagated from: LocalVar(28) ...
 JavaObject(9) NoEscape(GlobalEscape) NSR -> ArgEscape(GlobalEscape) propagated from: LocalVar(28) ...
 ```
 
-We can see here that the state of `JavaObject(9)` is updated to `ArgEscape(GlobalEscape)`, which makes it not scalar replaceable,
-which is also indicated by the 'NSR'. To find the reason for this, we have to follow back the chain of state updates in the
-log to the root. In this message we can see the state is propagated from `LocalVar(28)`. When I search for that, I find this:
+We can see here that the state of `JavaObject(9)` is updated to `ArgEscape(GlobalEscape)`, which makes it not scalar replaceable.
+This is also indicated by the 'NSR' (Not Scalar Replaceable). To find the reason for this, we have to follow back the
+chain of state updates in the log to the root. In this message we can see the state is propagated from `LocalVar(28)`.
+When I search for that, I find this:
 
 ```text
 LocalVar(28) NoEscape(NoEscape) -> NoEscape(GlobalEscape) propagated from: LocalVar(41) ...
@@ -515,9 +512,8 @@ LocalVar(41) ArgEscape(ArgEscape) -> ArgEscape(GlobalEscape) escapes as arg to: 
 i.e. our object escapes through an out-of-line call to `TestJIT$Scope::close`! And, if we follow the same process for `JavaObject(10)`,
 our other allocation, we end up at the same call. So, both objects escape through this call.
 
-Before we look into the reason for this out-of-line call being here (instead of being inlined), I'll say that the process
-of following the log is somewhat tedious. Lucky for you readers I've recently written a script that can parse the trace
-and report back information about escaping objects. You can find it here: https://cr.openjdk.org/~jvernee/TraceEAParser.java
+I'll say that the process of following the log is somewhat tedious. Lucky for you readers I've recently written a script
+that can parse the trace and report back information about escaping objects. You can find it [here](https://cr.openjdk.org/~jvernee/TraceEAParser.java).
 If I invoke that script on the trace: `java .\TraceEAParser.java EA.Txt`, I get the following:
 
 ```text
@@ -548,14 +544,14 @@ If we look for `TestJIT$Scope::close` in the trace, we find this:
 ```
 
 Unfortunately, `TestJIT$Scope::close` is not being inlined, which makes our objects escape. Actually, we've just diagnosed
-https://bugs.openjdk.org/browse/JDK-8267532 which doesn't have a solution as of the time of writing. But, we now at least
-know the reason _why_ the objects are escaping. In other cases this might be a more useful tool to track down a problematic
-piece of code in order to apply a spot fix. But, unfortunately when dealing with performance, there is not always a pot
-of gold at the end of the rainbow.
+[JDK-8267532](https://bugs.openjdk.org/browse/JDK-8267532) which doesn't have a solution as of the time of writing. But,
+we now at least know the reason _why_ the objects are escaping. In other cases this might be a more useful tool to track
+down a problematic piece of code in order to apply a spot fix. But, unfortunately when dealing with performance, there is
+not always a pot of gold at the end of the rainbow.
 
-# 6. Debugging compilation using a native debugger
+## 6. Debugging compilation using a native debugger
 
-Finally, let's bust out the ultimate escape hatch: debugging the source code directly during a compilation. Stepping through
+Finally, let's bust open the ultimate escape hatch: debugging the source code directly during a compilation. Stepping through
 the source code with a debugger is the ultimate tool for inspecting what a JIT compiler is doing, when all else falls short.
 For this, we need a 'slowdebug' build (obtained in a similar way to a fastdebug build). This is needed so that the VM is
 actually debugable without too many issues using a native debugging tool.
@@ -582,15 +578,15 @@ I'm using the `C/C++: (Windows) Attach` configuration which comes from the `C/C+
 is only needed once, after which I can just click the little green arrow in the top left with the '(Windows) Attach' run
 configuration selected.
 
-After attaching the native debugger, and pressing 'enter' in the test program terminal to make it continue execution, the
-VSCode window pops back up and throws me somewhere into the HotSpot compiler code. At this point I can set other breakpoints
-in the compiler code, and begin debugging the compilation of the payload method.
+After attaching the native debugger using the printed pid, and pressing 'enter' in the test program console to make it
+continue execution, the VSCode window pops back up and throws me somewhere into the HotSpot compiler code. At this point
+I can set other breakpoints in the compiler code, and begin debugging the compilation of the payload method.
 
-That should give you a basic idea on how to debug a compilation with a native debugger.
+That should give you a basic idea of how to debug a compilation with a native debugger.
 
 ## Conclusion
 
-That's all I have for now. Hopefully showing some of the debugging techniques I use gave you some starting points for
+That's all I have for now. Hopefully showing some of the debugging techniques I use gave you some inspiration for
 debugging HotSpot's JIT compilers yourself.
 
 ## Thanks for reading
