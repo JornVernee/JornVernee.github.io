@@ -22,6 +22,7 @@ have to research it yourself. But, maybe this blog post can give a few ideas on 
 2. [Getting the assembly of a compiled method](#2-getting-the-assembly-of-a-compiled-method)
 3. [Getting inlining traces](#3-getting-inlining-traces)
 4. [A closer look at compile commands](#4-a-closer-look-at-compile-commands)
+5. [Tracking down escaping objects](#5-tracking-down-escaping-objects)
 
 ## 1. Setting the stage
 
@@ -355,13 +356,199 @@ in the JEP: https://openjdk.org/jeps/165
 
 If you look at the compilerDirective file, you might notice that some options are only available in non-product builds.
 For the next section on escape analysis, I'm going to use such a non-product build, in particular a 'fastdebug' build of
-hotspot.
+HotSpot.
 
 # 5. Tracking down escaping objects
 
 For this section, I'm going to be using a 'fastdebug' build of HotSpot. You will not be able to use a release build if you
 wish to follow along.
 
+You might have encountered this when running [JMH](https://github.com/openjdk/jmh) benchmarks with `-prof gc`. You have a
+benchmark like so:
 
+```java
+Runnable dummy = () -> {};
+
+static class Scope implements AutoCloseable {
+    final List<Runnable> resources = new ArrayList<>();
+
+    void addCloseAction(Runnable runnable) {
+        resources.add(runnable);
+    }
+
+    @Override
+    public void close() {
+        for (Runnable r : resources) {
+            r.run();
+        }
+    }
+}
+@Benchmark
+public void testMethod() throws InterruptedException {
+    try (Scope scope = new Scope()) {
+        scope.addCloseAction(dummy);
+    }
+}
+```
+
+And when running it with `-prof gc` you see some allocation happening:
+
+```text
+MyBenchmark.testMethod:gc.alloc.rate.norm  avgt   50    96.000 ±   0.001    B/op
+```
+
+96 bytes per operation are being allocated. But, HotSpot has escape analysis which allows allocations to be eliminated,
+and as far as we can see there are no objects allocated that escape from the benchmark method. So, why are we 
+still seeing allocations? To investigate this we are going to use the `TraceEscapeAnalysis` compile command (which is not
+available in release builds). This command prints a trace of the escape analysis algorithm, which we can use to track down
+which objects escape, and why.
+
+Let's start by modifying our payload to include the code in the benchmark:
+
+```java
+ public void payload() {
+    try (Scope scope = new Scope()) {
+        scope.addCloseAction(dummy);
+    }
+}
+
+Runnable dummy = () -> {};
+
+static class Scope implements AutoCloseable {
+    final List<Runnable> resources = new ArrayList<>();
+
+    void addCloseAction(Runnable runnable) {
+        resources.add(runnable);
+    }
+
+    @Override
+    public void close() {
+        for (Runnable r : resources) {
+            r.run();
+        }
+    }
+}
+```
+
+Note that I've turned the payload method into an instance method, to make that work I'm simply create an instance of the
+TestJIT class and invoking payload on that:
+
+```java
+TestJIT recv = new TestJIT();
+for (int i = 0; i < 20_000; i++) {
+    recv.payload();
+}
+```
+
+To get an escape analysis trace, I just change the `PrintInlining` compile command to `TraceEscapeAnalysis` in the base command:
+`-XX:CompileCommand=TraceEscapeAnalysis,TestJIT::payload`. I also pipe the output to a file `... > EA.txt`, since it's so
+long.
+
+The output I get is... quite long, and I wont include it in full here. The important things to look for are the line like
+this:
+
+```text
++++++ Initial worklist for virtual void TestJIT.payload() (ea_inv=0)
+```
+
+Notice the `ea_inv=0` at the end. Escape analysis can run for multiple iterations. To find escape objects however, only
+the last iteration is relevant. So, I just search for `ea_inv`, and find the last iteration which is `ea_inv=1`, and delete
+the rest of the trace before that.
+
+The rest of the trace should be split into 2 parts: the initial work list, whose start is marked by the line of text above,
+and then the actual calculation trace, which is marked by the following line:
+
+```text
++++++ Calculating escape states and scalar replaceability
+```
+
+The next step is to find our object allocations in the initial work list. Object allocations are represented by `Allocate`
+nodes in C2, so we can look for the string `'Allocate  ==='`. Be sure to only look at the allocations in the initial work
+list. There should be 2 for the test program I've shown:
+
+```text
+JavaObject(9) NoEscape(NoEscape) [ [ 37 ]]     25  Allocate  === 5 6 7 8 1 (23 21 22 1 1 10 1 1 1 ) [[ 26 27 28 35 36 37 ]]  rawptr:NotNull ( int:>=0, java/lang/Object:NotNull *, bool, top, bool ) TestJIT::payload @ bci:0 (line 12) !jvms: TestJIT::payload @ bci:0 (line 12)
+JavaObject(10) NoEscape(NoEscape) [ [ 102 ]]     90  Allocate  === 39 36 63 8 1 (88 87 22 1 1 10 1 1 1 42 1 42 ) [[ 91 92 93 100 101 102 ]]  rawptr:NotNull ( int:>=0, java/lang/Object:NotNull *, bool, top, bool ) TestJIT$Scope::<init> @ bci:5 (line 20) TestJIT::payload @ bci:4 (line 12) !jvms: TestJIT$Scope::<init> @ bci:5 (line 20) TestJIT::payload @ bci:4 (line 12)
+```
+
+These allocations start out as non-escaping, but at some point they might escape during the following computation. In the 
+debug string for the Allocate node, we can see where the allocation is happening in the code: `TestJIT::payload @ bci:0 (line 12)`
+and `TestJIT$Scope::<init> @ bci:5 (line 20)`. So we have 2 allocations, one in the payload method on line 12, and one in
+the constructor of `Scope` on line 20. These are the lines:
+
+```java
+try (Scope scope = new Scope()) {
+```
+
+And:
+
+```java
+final List<Runnable> resources = new ArrayList<>();
+```
+
+Exactly where we are using the `new` operator!
+
+Now, let's try and find where these objects are escaping. I'll start by searching for `JavaObject(9)` in the calculating
+escape states messages. I find this (I've omitted some of the end of the output which is not relevant):
+
+```text
+JavaObject(9) NoEscape(NoEscape) -> NoEscape(GlobalEscape) propagated from: LocalVar(28) ...
+JavaObject(9) NoEscape(GlobalEscape) NSR -> ArgEscape(GlobalEscape) propagated from: LocalVar(28) ...
+```
+
+We can see here that the state of `JavaObject(9)` is updated to `ArgEscape(GlobalEscape)`, which makes it not scalar replaceable,
+which is also indicated by the 'NSR'. To find the reason for this, we have to follow back the chain of state updates in the
+log to the root. In this message we can see the state is propagated from `LocalVar(28)`. When I search for that, I find this:
+
+```text
+LocalVar(28) NoEscape(NoEscape) -> NoEscape(GlobalEscape) propagated from: LocalVar(41) ...
+```
+
+i.e. the state for `LocalVar(28)` was itself propagated from `LocalVar(41)`. If I keep following the chain back, I eventually
+get to:
+
+```text
+LocalVar(41) ArgEscape(ArgEscape) -> ArgEscape(GlobalEscape) escapes as arg to: 1020  CallStaticJava  === 414 407 408 8 1 (42 1 1 417 1 ) [[ 1021 1022 1023 ]] # Static  TestJIT$Scope::close void ( TestJIT$Scope (java/lang/AutoCloseable):NotNull * ) TestJIT::payload @ bci:25 (line 12) !jvms: TestJIT::payload @ bci:25 (line 12)
+```
+
+i.e. our object escapes through an out-of-line call to `TestJIT$Scope::close`! And, if we follow the same process for `JavaObject(10)`,
+our other allocation, we end up at the same call. So, both objects escape through this call.
+
+Before we look into the reason for this out-of-line call being here (instead of being inlined), I'll say that the process
+of following the log is somewhat tedious. Lucky for you readers I've recently written a script that can parse the trace
+and report back information about escaping objects. You can find it here: https://cr.openjdk.org/~jvernee/TraceEAParser.java
+If I invoke that script on the trace: `java .\TraceEAParser.java EA.Txt`, I get the following:
+
+```text
+Escaping allocations:
+
+JavaObject(9) allocation in: TestJIT::payload @ bci:0 (line 12)
+  -> LocalVar(28)
+  -> LocalVar(41)
+  Reason: EscapesAsArg[callNode=1020  CallStaticJava  === 414 407 408 8 1 (42 1 1 417 1 ) [[ 1021 1022 1023 ]] # Static  TestJIT$Scope::close void ( TestJIT$Scope (java/lang/AutoCloseable):NotNull * ) TestJIT::payload @ bci:25 (line 12) !jvms: TestJIT::payload @ bci:25 (line 12)]
+
+
+JavaObject(10) allocation in: TestJIT$Scope::<init> @ bci:5 (line 20)
+  -> Field(19)
+  -> JavaObject(9)
+  -> LocalVar(28)
+  -> LocalVar(41)
+  Reason: EscapesAsArg[callNode=1020  CallStaticJava  === 414 407 408 8 1 (42 1 1 417 1 ) [[ 1021 1022 1023 ]] # Static  TestJIT$Scope::close void ( TestJIT$Scope (java/lang/AutoCloseable):NotNull * ) TestJIT::payload @ bci:25 (line 12) !jvms: TestJIT::payload @ bci:25 (line 12)]
+```
+
+A nice summary of the escaping allocations (if I do say so myself ;)). Again, we can see here that there are 2 escaping
+allocations which are both escaping through a call to `TestJIT$Scope::close`.
+
+Now, for the reason why this out of line call is here, we can generate an inlining trace, as shown in [section 3](#3-getting-inlining-traces).
+If we look for `TestJIT$Scope::close`, what we find is this:
+
+```text
+                            @ 25   TestJIT$Scope::close (39 bytes)   already compiled into a medium method
+```
+
+Unfortunately, `TestJIT$Scope::close` is not being inlined, which makes our objects escape. Actually, we've just diagnosed
+https://bugs.openjdk.org/browse/JDK-8267532 which currently doesn't have a solution yet.
+
+# 6. Debugging compilation using a native debugger
 
 ## Thanks for reading
