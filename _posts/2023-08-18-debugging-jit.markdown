@@ -21,6 +21,7 @@ have to research it yourself. But, maybe this blog post can give a few ideas on 
 1. [Setting the stage](#1-setting-the-stage)
 2. [Getting the assembly of a compiled method](#2-getting-the-assembly-of-a-compiled-method)
 3. [Getting inlining traces](#3-getting-inlining-traces)
+4. [A closer look at compile commands](#4-a-closer-look-at-compile-commands)
 
 ## 1. Setting the stage
 
@@ -336,5 +337,31 @@ flag. Now the inlining trace looks like this:
 That should cover the basics of inlining traces.
 
 ## 4. A closer look at compile commands
+
+By now you've probably noticed how useful the `-XX:CompileCommand=...` option is. This command use used to control compiler
+settings on a per-method basis. To get more information about the `CompileCommand` flag, we can use:
+
+```powershell
+java -XX:CompileCommand=help
+```
+
+This will output the standard Java help message, but if you scroll up above that in the console output, you should also
+find the `CompileCommand` help message. This describes the syntax of the flag, and lists all the options that can be
+used in combination with the flag. A lot of the flags are also listed in the [`./src/hotspot/share/compiler/compilerDirectives.hpp` file](https://github.com/openjdk/jdk/blob/bcba5e97857fd57ea4571341ad40194bb823cd0b/src/hotspot/share/compiler/compilerDirectives.hpp).
+
+Besides specifying these compile commands on the command line, it's also possible to specify them through a json file,
+which gives slightly more flexibility on which compiler the option applies to. More information about that can be found
+in the JEP: https://openjdk.org/jeps/165
+
+If you look at the compilerDirective file, you might notice that some options are only available in non-product builds.
+For the next section on escape analysis, I'm going to use such a non-product build, in particular a 'fastdebug' build of
+hotspot.
+
+# 5. Tracking down escaping objects
+
+For this section, I'm going to be using a 'fastdebug' build of HotSpot. You will not be able to use a release build if you
+wish to follow along.
+
+
 
 ## Thanks for reading
