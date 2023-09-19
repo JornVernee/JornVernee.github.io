@@ -337,6 +337,22 @@ flag. Now the inlining trace looks like this:
 
 That should cover the basics of inlining traces.
 
+Some notes for debugging profile pollution: profiling happens for instance when a virtual method is called. The JVM will
+record the type of the receiver, and if it's always one of two types, the C2 JIT can inline the method call using an inlining
+cache. Profiles are attached to particular bytecodes, this means that when we have a virtual method call site in some heavily
+shared code that sees a lot of different receiver types, C2 can fail to inlining such method calls. This is sometimes called
+profile pollution: the profile for the call is 'polluted' with many different receiver types.
+
+Inlining traces can be useful to diagnose profile pollution. Polluted methods will show up as `virtual call` in the
+inlining trace. It is however important to turn on tiered compilation again for that in order to get an accurate profile
+(profiling also happens in lower tiers). So, instead of `-XX:-TieredCompilation` we need to use `-XX:+TieredCompilation`
+(replacing the `-` with a `+`). This will however also make it so the inlining trace contains traces from multiple
+compilations. To be able to differentiate them, we can use `-XX:CompileCommand=PrintCompilation,TestJIT::payload`, this
+will output some info about the compilation at the start of an inlining trace for a particular compilation, making the
+traces much easier to differentiate (e.g. `   2591  308    b  4       AbsMapProfiling::payload (139 bytes)` followed by
+the inlining trace for that compilation). For the most relevant information, you probably want to look at the trace for
+that last compilation of the method.
+
 ## 4. A closer look at compile commands
 
 By now you've probably noticed how useful the `-XX:CompileCommand=...` option is. This command is used to control compiler
