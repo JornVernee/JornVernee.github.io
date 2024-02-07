@@ -404,10 +404,11 @@ static void m() throws Throwable {
 }
 ```
 
-Here, the receiver of the `invokeExact` call, is loaded directly from the `static final` field `MH_FOO`. `static final`
+Here, the receiver of the `invokeExact` call is loaded directly from the `static final` field `MH_FOO`. `static final`
 fields can not be changed, not even through reflection. So, the JIT can constant fold the load
-from the `MH_FOO` field, making the receiver a constant, and then inspect its target method and treat the call to
-`invokeExact` as a if it were a call to its target method `foo`.
+from the `MH_FOO` field, making the receiver of `invokeExact` a constant. The JIT can then inspect
+the receiver's target method and treat the call to `invokeExact` as a if it were a call to
+the target method `foo`.
 
 Now for a more complex example:
 
