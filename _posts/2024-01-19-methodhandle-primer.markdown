@@ -9,20 +9,22 @@ The method handles API in the `java.lang.invoke` package is a powerful reflectio
 generation API that has extensive JIT support as well. In this blog post I will give an 
 overview of this API. I will go over some of the most commonly used parts of the API,
 but this is not a comprehensive guide. It's meant to give you a starting point from which
-to start learning more on your own.
+to start learning more on your own. The reader is encouraged to experiment with the samples
+on their own as well.
 
 1. [What is a `MethodHandle`?](#what-is-a-methodhandle)
     1. [Access checks](#access-checks)
     2. [Exception handling](#exception-handling)
     3. [Signature polymorphism](#signature-polymorphism)
-    4. [The `invokeExact` method](#the-invokeexact-method)
-    5. [The `invokeWithArguments` method](#the-invokewitharguments-method)
+    4. [Handling the receiver](#handling-the-receiver)
+    5. [The `invokeExact` method](#the-invokeexact-method)
+    6. [The `invokeWithArguments` method](#the-invokewitharguments-method)
 2. [Method handle inlining](#method-handle-inlining)
 3. [Method handle combinators](#method-handle-combinators)
-    1. [`MethodHandles::insertArguments`](#methodhandlesinsertarguments)
-    2. [`MethodHandles::filterArguments`](#methodhandlesfilterarguments)
-    3. [`MethodHandles::collectArguments`](#methodhandlescollectarguments)
-    4. [`MethodHandles::permuteArguments`](#methodhandlespermutearguments)
+    1. [`MethodHandles::insertArguments`](#the-methodhandlesinsertarguments-combinator)
+    2. [`MethodHandles::filterArguments`](#the-methodhandlesfilterarguments-combinator)
+    3. [`MethodHandles::collectArguments`](#the-methodhandlescollectarguments-combinator)
+    4. [`MethodHandles::permuteArguments`](#the-methodhandlespermutearguments-combinator)
 4. [Appendix A: `MutableCallSite`](#appendix-a-mutablecallsite)
 5. [Appendix B: `VarHandle`](#appendix-b-varhandle)
 
@@ -86,14 +88,21 @@ the 2 APIs.
 
 ### Access checks
 
-The `invoke` method of a `j.l.r.Method` is `@CallerSensitive`, and will perform
-access checks when invoking it. A `MethodHandle` on the other hand, doesn't do any access
-checks when it is invoked. Instead, the access checks are preformed when looking up the 
-method handle. The access context is described by the lookup object instead. You'll note
-that the `MethodHandles::lookup` method is caller sensitive instead. Wherever you call `lookup`,
-that's the access context you capture. This allows a client to do a single access check when
-the method handle is created, and after that get better performance by avoiding the access
-checks when invoking the method handle.
+The `invoke` method of a `j.l.r.Method` performs access checks when it is invoked it. This
+is also hinted at by the `@CallerSensitive` annotation. This informative annotation indicates
+that this method will inspect its caller when it is invoked. In practice, the `invoke` method will
+do a short stack walk to find the class of the caller (though this stack walk may be optimized away by the JIT).
+The method then checks whether the caller has the needed access privileges to invoke the
+target method.
+
+A method handle on the other hand, doesn't do any access checks when it is invoked (and
+therefore doesn't need to be caller sensitive). Instead, the access checks are preformed
+when looking up the method handle. You'll note that the `MethodHandles::lookup` method is
+caller sensitive instead. When calling `lookup`, the caller class is captured as the _lookup class_.
+This lookup class is then used when performing a method handle lookup to check that it has
+the needed access privileges to invoke the target method. This allows a client to
+do a single access check when the method handle is created, and after that get better
+performance by avoiding the access checks when invoking the method handle.
 
 💡This also means that, if you have the method handle object, you have the capability to
 invoke it. Thus, we say that a method handle is a 'capability'. Through sharing the method 
@@ -180,13 +189,22 @@ long result = (long) mh.invoke(x, y);
 ```
 
 Then the `invokevirtual` instruction that `javac` generates for this call to `invoke`, will
-point to a method type descriptor like `(Ljava/lang/String;I)J`. This is different than the
+point to the method type descriptor `(Ljava/lang/String;I)J`. This is different than the
 method type descriptor of the declaration of the `invoke` method, which would be `([Ljava/lang/Object;)Ljava/lang/Object;`.
+
+We can use the `javap` tool that comes with the JDK to check what type `javac` assigns to
+this call site as well. When disassembling the generated class file using `javap -c <file>`,
+we can find an `invokevirtual` instruction of the `MethodHandle::invoke` method with the 
+type descriptor `(Ljava/lang/String;I)J`:
+
+```text
+46: invokevirtual #44  // Method java/lang/invoke/MethodHandle.invoke:(Ljava/lang/String;I)J
+```
 
 You can read more about this in the JLS, for instance
 in section [15.12.3](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.12.3).
 
-To make sig-poly methods work, the VM will generate some code every time that a sig-poly
+To make sig-poly methods work, the VM will generate some code every time a sig-poly
 method is linked, and this will happen once for each type that a sig-poly method
 takes on. This linking process involves spinning both machine code, and usually Java bytecode,
 to link the method handle call to the actual target method using the right invocation semantics,
@@ -200,6 +218,49 @@ an `Object[]`, is another good reason to use method handles. If you want a type 
 a piece of invocable code, but you aren't sure what the exact types or number of arguments
 will be, then method handles are a good option. They provide a generic invocation API,
 without the inefficiency associated with boxing up arguments and return values.
+
+### Handling the receiver
+
+The _receiver_ is the `this` argument of a virtual method. `j.l.r.Method` handles the
+receiver as an explicit leading parameter of type `Object`:
+
+```java
+Object invoke(Object obj, Object... args)
+```
+
+When invoking a `static` method, the `obj` argument is simply ignored. Typically we just
+pass `null` in place of the `obj` parameter.
+
+For method handles on the other hand, the receiver parameter is just another parameter
+that is prepended to the parameter list. So, if we look up a virtual method:
+
+```java
+public static void main(String[] args) throws Throwable {
+    MethodHandle targetMh = MethodHandles.lookup().findVirtual(Main.class, "target",
+            MethodType.methodType(void.class));
+
+    targetMh.invoke(new Main()); // prints 'invoking target'
+}
+
+public void target() { // NOT static
+    System.out.println("invoking target");
+}
+```
+
+We need to pass an instance of the receiver (`new Main()`) when invoking the method handle.
+But, when we look up a static method handle (like in the first example in the 'What is a `MethodHandle`')
+there is no additional leading parameter.
+
+Note in particular the method type that is used to look up the virtual method:
+
+```java
+MethodType.methodType(void.class)
+```
+
+💡The method type used to look up a virtual method does _not_ contain the receiver type.
+However, the receiver type _does_ appear in the type of the returned method handle. When
+looking up virtual methods the receiver type is implied by the holder class (`Main.class`
+in this case). This is an important thing to keep in mind when looking up virtual methods.
 
 ### The `invokeExact` method
 
@@ -294,8 +355,8 @@ static void foo(String str) {
 
 If we call `invoke` on a method handle, the implementation will call `asType` to convert the
 type of the method handle to the type that is requested by the call site. It is
-probably easy to see how generating a new class is costly when we just want to invoke
-a method. It's not all bad though: each method handle instance has a 1 element cache, and
+probably easy to see how generating a synthetic class + method is costly when we just want
+to invoke  a method. It's not all bad though: each method handle instance has a 1 element cache, and
 the result of `asType` is stored in that cache. If the next call to `asType` requests the
 same method type again, the cached method handle is just returned. In practice this means
 that calling `invoke` is only costly if the same method handle instance is invoked multiple times
@@ -306,6 +367,28 @@ While very convenient, the automatic type conversions of `invoke` can also be a
 performance pitfall. However, we can be 100% sure to avoid this pitfall by
 using `invokeExact`, as it will never perform any type adaptations. So, as a performance
 rule of thumb: avoid _inexact_ call. Prefer `invokeExact` over `invoke`.
+
+💡When working with method handles, it is often useful to create a `static` wrapper function
+for calls to `invokeExact`:
+
+```java
+static final MethodHandle FOO_MH = ...
+
+public static void main(String[] ___) throws Throwable {
+    fooWrapper("Hello, world!");
+}
+
+public static void fooWrapper(Object o) {
+    FOO_MH.invokeExact(o);
+}
+```
+
+Here the method `fooWrapper` has the exact same method type as the `FOO_MH` method handle.
+But, by wrapping it in a `static` method, we provide an non sig-poly method for clients to invoke
+instead. This means that e.g. the `main` method in the above example doesn't have to worry
+about casting the string argument to `Object` explicitly, while at the same time avoiding
+any type mismatches between the method handle and the call site. We say that the `fooWrapper`
+'civilizes' the sharp-but-flexible `invokeExact` API.
 
 ### The `invokeWithArguments` method
 
@@ -410,6 +493,26 @@ from the `MH_FOO` field, making the receiver of `invokeExact` a constant. The JI
 the receiver's target method and treat the call to `invokeExact` as a if it were a call to
 the target method `foo`.
 
+We can check that inlining of the `invokeExact` call is taking place using the techniques 
+described in chapter 3 of my other post about debugging JIT compilers:
+[3. Printing inlining traces](https://jornvernee.github.io/hotspot/jit/2023/08/18/debugging-jit.html#3-printing-inlining-traces).
+
+If we apply those techniques to obtain an inlining trace for the method `m` in the above
+program, we get the following inlining trace:
+
+```text
+@ 3   java.lang.invoke.LambdaForm$MH/0x00000236d7001400::invokeExact_MT (22 bytes)   force inline by annotation
+  @ 10   java.lang.invoke.Invokers::checkExactType (17 bytes)   force inline by annotation
+    @ 1   java.lang.invoke.MethodHandle::type (5 bytes)   accessor
+  @ 14   java.lang.invoke.Invokers::checkCustomized (23 bytes)   force inline by annotation
+    @ 1   java.lang.invoke.MethodHandleImpl::isCompileConstant (2 bytes)   (intrinsic)
+  @ 18   java.lang.invoke.LambdaForm$DMH/0x00000236d7001800::invokeStatic (20 bytes)   force inline by annotation
+    @ 8   java.lang.invoke.DirectMethodHandle::internalMemberName (8 bytes)   force inline by annotation
+    @ 16   Main::foo (1 bytes)   inline (hot)
+```
+
+Here we can see at the end that the method `Main::foo` is being inlined.
+
 Now for a more complex example:
 
 ```java
@@ -465,6 +568,13 @@ However, in that case, the load of the `mh_foo` field of `Widget` can still not 
 folded, since `final` fields are not 'trusted'. They can for instance still be modified through
 reflection. As a result, the JIT may not constant fold the load of the `mh_foo` field, the
 receiver of `invokeExact` will not be constant, and the call can not be inlined.
+
+We can see this in an inlining trace in the form of a call to `MethodHandle::invokeBasic`
+that failed to inline:
+
+```text
+@ 18   java.lang.invoke.MethodHandle::invokeBasic()V (0 bytes)   failed to inline: receiver not constant
+```
 
 There are some exceptions to this rule though. Classes in certain packages in `java.base`
 have trusted `final` fields. Additionally, fields of a record are trusted as well. The JIT
