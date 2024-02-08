@@ -34,6 +34,52 @@ A `java.lang.invoke.MethodHandle` is an object that wraps a fixed Java _target m
 It is, as the name says, a 'handle' for a Java method. The target method can be invoked
 through the method handle object.
 
+In a lot of cases, we can use a functional interface to represent a reference to some
+invocable code, e.g. one of the interfaces in the `java.util.function` package. However, we
+can not rely on generics and functional interfaces to represent a method that takes a
+variable number of arguments with varying types. The best we can do is use a varargs method,
+which collects arguments into an array, but this incurs the overhead of the
+creation of the varargs array, the overhead of boxing and unboxing primitive values, and the
+overhead of storing and loading values from the array. We can also not represent both a
+method that returns a value and a method that returns nothing. There are workarounds using
+`Void`, but these still require a method to return some value, usually `null`.
+
+```java
+interface GenericFunction<R> {
+    R apply(Object... args);
+}
+
+static int m1(int x, int y) {
+    return x + y;
+}
+
+static void m2() {}
+
+static void main(String[] __) {
+    GenericFunction<Integer> m2Ref = args -> { return m1((int) args[0], (int) args[1]); };
+    int result = m2Ref.apply(1, 2); // arguments boxed into Object[]
+    // result has to be unboxed
+
+    // have to explicitly return 'null'
+    GenericFunction<Void> m1Ref = args -> { m2(); return null; };
+}
+```
+
+Method handles on the other hand don't have these limitations (more on that later). The
+type of a method is not tied to the static type system of the Java language, so they can
+be used to represent a reference of a method of any type.
+
+In practice, method handles are most useful to represent the result of an API that 
+generates code at runtime, where the number and type of parameters is not known in advance. 
+Method handles are for instance used to implement references to native
+functions in the foreign function and memory access (FFM) API. The method
+`java.lang.foreign.Linker::downcallHandle` which is used for this, accepts a
+`FunctionDescriptor` and returns a `MethodHandle` instance that can be used to invoke a C
+function. The linker API needs to provide access to any C function, so it needs a type
+that can be used to represent a reference to functions of varying arity, and with varying
+parameter and return types, while at the same time avoiding the overhead of varargs and
+boxing & unboxing primitve values. `MethodHandle` is an excellent choice in that case.
+
 One of the simplest ways to create a `MethodHandle` for a particular Java method, is to perform
 a method handle lookup. First, we have to create a `MethodHandles.Lookup` object. This can
 be done using the [`MethodHandles::lookup`](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/invoke/MethodHandles.html#lookup())
