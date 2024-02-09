@@ -65,9 +65,8 @@ static void main(String[] __) {
 }
 ```
 
-Method handles on the other hand don't have these limitations (more on that later). The
-type of a method is not tied to the static type system of the Java language, so they can
-be used to represent a reference of a method of any type.
+Method handles on the other hand don't have the same limitations when it comes to boxing
+and unboxing (more on that later).
 
 In practice, method handles are most useful to represent the result of an API that 
 generates code at runtime, where the number and type of parameters is not known in advance. 
