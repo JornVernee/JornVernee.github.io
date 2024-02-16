@@ -5,21 +5,21 @@ date:   2024-02-16 14:14:42 +0100
 categories: hotspot jit
 ---
 
-For JDK 22 we resolved a performance issue that had been plaguing the FFM API for a while.
+In JDK 22 we resolved a performance issue that had been plaguing the FFM API for a while.
 We were seeing excess allocations when using try-with-resources with freshly created `Arena`s,
-which were caused by dead code in exception handlers (`catch` blocks) not being removed by C2.
+which were caused by dead code in exception handlers (`catch` blocks) not being removed by the C2 JIT compiler.
 
-We solved this in JDK 22: [8267532: C2: Profile and prune untaken exception handlers](https://github.com/openjdk/jdk/pull/16416)
+We solved this for JDK 22: [8267532: C2: Profile and prune untaken exception handlers](https://github.com/openjdk/jdk/pull/16416)
 
 The effect of this optimization is more broadly applicable to Java code using try-with-resources,
 or just any untaken `catch` block. So I thought it would be interesting to discuss the issue,
-and how it was solved, in this blog post.
+and how it was solved, in this post.
 
 By the way, 'pruning' in the title refers to the pruning you would do while gardening, where part of a
 plant, such as a branch, is cut off. This is similar to how we 'cut off' dead branches in
 code while JIT compiling.
 
-## Why is my allocation escaping?
+## Why are my allocations escaping?
 
 The use pattern where we ran into this issue is one that is fairly common when using the FFM API:
 
@@ -30,18 +30,18 @@ try (Arena arena = Arena.ofConfined()) {
 }
 ```
 
-this code is creating a new arena, allocating a some data in that arena, and then passing the
+This code is creating a new arena, allocating a some data in that arena, and then passing the
 pointer to that data to a native function (`func`). Assume that the implementation
 of `func` just forwards the call using a native method handle produced by `java.lang.foreign.Linker::downcallHandle`.
 
 There are several allocations in this code: the `Arena` and the `MemorySegment` are the 
-most prominent ones. However, since the implementation of `func` will only pass a primititive
-address to the native function, none of the allocated objects escape, and in theory C2 should
-be able to scalar replace these objects, avoiding their allocation altogether.
+most prominent ones. However, since the implementation of `func` will only pass a primitive
+address to the native function, none of the allocated objects escape to wider Java code,
+and in theory C2 should be able to scalar replace these objects, avoiding their allocation altogether.
 
-However, when verifying this using the techniques describes in my other blog post: 
+But, when verifying this using the techniques described in my other post: 
 ['Tracking down escaping objects'](https://jornvernee.github.io/hotspot/jit/2023/08/18/debugging-jit.html#5-tracking-down-escaping-objects)
-it turned out that there were several escaping allocations. For JDK 21, this code has the
+it turned out that there were several escaping allocations. In JDK 21, this code has the
 following escaping allocations:
 
 ```text
@@ -89,7 +89,7 @@ and out-of-line call to `jdk.internal.foreign.MemorySessionImpl$1::close`.
 
 ## Why is this call not being inlined?
 
-So, why is there an out-of-line call here that is sucking up our object graph? Looking at
+So, why is there an out-of-line call here that is making our object graph escape? Looking at
 the [inlining trace](https://jornvernee.github.io/hotspot/jit/2023/08/18/debugging-jit.html#3-printing-inlining-traces),
 we find that... the call is being inlined?
 
@@ -146,31 +146,38 @@ Exception table:
       35    41    44   Class java/lang/Throwable
 ```
 
-This is a consequence of how `finally` blocks are translated by `javac`. The code in a `finally`
+We see two calls to `close`: one at bytecode index (bci) `22` and one at `36`. This is a
+consequence of how `finally` blocks are translated by `javac`. The code in a `finally`
 block is essentially copy pasted along the non-exception path and the exception path (in the exception handler).
-If we look at the exception table, we see that bytecode index (bci) 36 is inside an exception handler.
+If we look at the exception table, we see that bci 36 is inside an exception handler. This
+all checks out so far.
 
-So, the call to `close` along the normal exception-less path is being inlined as expected,
-but the call to `close` in the exception handler is not being inlined due to 'low call site frequency'.
-If we reference this back to the escaping allocations, we see that it is this call in the exception
-handler at bci 36, into which the object graph escapes: `TestArena::payload @ bci:36 (line 25)`.
+So, if we look back at our inlining trace, we see that the call to `close` along the normal
+exception-less path is being inlined as expected, but the call to `close` in the exception
+handler is not being inlined due to 'low call site frequency'. If we reference this back
+to the escaping allocations, we see that it is this call in the exception handler at bci 36
+into which the object graph escapes:
 
-C2 will not inline calls that are hardly ever reached (low frequency), since these calls are likely not on the 
-hot path, and therefore there would be less benefit from inlining, which would further
-bloat the generated code as well. In our specific case, the call site is _never_ reached
+```text
+Reason: Escapes as argument to call to: jdk.internal.foreign.MemorySessionImpl$1::close ... TestArena::payload @ bci:36 (line 25)
+```
+
+C2 will not inline calls that are hardly ever reached (low frequency), since these calls
+are likely not on the hot path, and therefore there would be less benefit from inlining.
+In our specific case, the call site of `close` in the exception handler is _never_ reached
 however, but, this 'dead' code is still interfering with other optimizations, such as
 scalar replacement. The dead code is not outright removed because there is still a chance
-that an exception might occur some time in the future, so the code C2 generates has to account
-for that possibility.
+that an exception might occur some time in the future, so the code C2 generates has to
+account for that possibility.
 
 However, C2 also has a way to deal with code that is never reached _in practice_: uncommon traps.
 An uncommon traps replaces a piece of code that is very unlikely to be needed (based on 
 profiling information), with a _trap_ that deoptimizes the code and continues running in
-the interpreter. The C2 JIT essentially bets that this code is not needed, so it's not
-worth optimizing for. (The fact that this is possible is one of the strengths of a mixed
+the interpreter. C2 essentially bets that this code is not needed, so it's not
+worth optimizing for. The fact that this is possible is one of the strengths of a mixed
 mode VM that can both interpret and JIT compile code: the JIT can speculate and go back to
-the interpreter in the worst case). This is for instance used to prune unlikely branches of
-an `if`/`else`.
+the interpreter in the worst case. Uncommon traps are for instance used to prune unlikely
+branches of `if`/`else` statements.
 
 An uncommon trap can also re-inflate objects that have been scalar replaced, so they do not
 interfere with the scalar replacement optimization, even though an uncommon trap may 'use'
@@ -181,7 +188,7 @@ exception handler). This should then allow our object graph to be scalar replace
 ## Why is there no uncommon trap?
 
 For 'regular' branches, such as the branches of an `if` statement, JDK 21 profiles these
-branches by counting every time each branch is taken. The JIT then uses this count, together
+branches by counting how many times a branch is taken. The JIT then uses this count, together
 with the invocation count of the enclosing method, to determine how frequent this branch is
 taken. If a branch is heuristically deemed to be 'rarely' taken, that branch is replaced with
 an uncommon trap.
@@ -199,7 +206,7 @@ But, this would slow down the execution of _all_ bytecodes, for something that i
 be 'exceptional', i.e. happen rarely. This doesn't sound like a good deal, and I suspect one
 of the main reasons why profiling of exception handlers wasn't done sooner.
 
-However, when an exception is thrown, we go through a interpreter runtime call to look up the exception
+But, when an exception is thrown, we go through an interpreter runtime call to look up the exception
 handler. We can just put the profiling code in that runtime call, under the assumption that
 we only need to look up an exception handler when we are actually going to execute it. That
 is also what we ended up doing: whenever we look up an exception handler, we mark that
@@ -213,7 +220,8 @@ code is compiled (since exceptions are evidently a possibility after all).
 ## Success!
 
 We side step the issue of an out-of-line call into which our objects escape, by replacing
-the branch that call is in with an uncommon trap. As a result, our objects no longer escape:
+the branch that the call is in with an uncommon trap. As a result, most of our objects no
+longer escape:
 
 ```text
 JavaObject(31) allocation in: SegmentFactories::allocateSegment @ bci:100 (line 158)
@@ -225,7 +233,7 @@ fix in mind for as well).
 
 For use cases like our little code sample, this cuts the amounts of bytes allocated in half,
 and potentially makes the execution twice as fast. See for instance the numbers from the
-benchmark included in the linker pull request:
+benchmark included in the linked pull request:
 
 Before:
 
@@ -244,6 +252,6 @@ ResourceScopeCloseMin.confined_close:gc.alloc.rate.norm        avgt   30     56.
 ```
 
 The great thing is that this doesn't just help the FFM API, but potentially helps any code
-that uses exception handler, such as try-with-resources, or `catch`. If you find any such
-cases when using JDK 22, I'd love to hear about them! Feel free to tweet at me (X at me?):
-[@JornVernee](https://twitter.com/JornVernee)
+that uses exception handlers, such as try-with-resources, or `catch`. So, if you have any 
+use-cases on the hot paths of your code that have untaken exception handlers, keep an eye
+out for any performance improvements coming in JDK 22!
