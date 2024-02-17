@@ -165,10 +165,10 @@ Reason: Escapes as argument to call to: jdk.internal.foreign.MemorySessionImpl$1
 C2 will not inline calls that are hardly ever reached (low frequency), since these calls
 are likely not on the hot path, and therefore there would be less benefit from inlining.
 In our specific case, the call site of `close` in the exception handler is _never_ reached
-however, but, this 'dead' code is still interfering with other optimizations, such as
-scalar replacement. The dead code is not outright removed because there is still a chance
-that an exception might occur some time in the future, so the code C2 generates has to
-account for that possibility.
+however, because an exception is never thrown. But, this 'dead' code is still interfering
+with other optimizations, such as scalar replacement. The dead code is not outright removed
+because there is still a chance that an exception might occur some time in the future, so
+the code C2 generates has to account for that possibility.
 
 However, C2 also has a way to deal with code that is never reached _in practice_: uncommon traps.
 An uncommon traps replaces a piece of code that is very unlikely to be needed (based on 
