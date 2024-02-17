@@ -313,8 +313,8 @@ to `PrintInlining`, which will give us an inlining trace: `-XX:CompileCommand=Pr
 I get is simply:
 
 ```text
-                            @ 0   TestJIT::otherMethod (4 bytes)   inline (hot)
-                              @ 0   TestJIT::yetAnotherMethod (3 bytes)   inline (hot)
+@ 0   TestJIT::otherMethod (4 bytes)   inline (hot)
+  @ 0   TestJIT::yetAnotherMethod (3 bytes)   inline (hot)
 ```
 
 The format of an inlining trace is not really documented, unfortunately. The best source of information to understanding
@@ -332,7 +332,7 @@ Let's see what happens if we disable inlining of `otherMethod` using the `-XX:Co
 flag. Now the inlining trace looks like this:
 
 ```text
-                            @ 0   TestJIT::otherMethod (4 bytes)   disallowed by CompileCommand
+@ 0   TestJIT::otherMethod (4 bytes)   disallowed by CompileCommand
 ```
 
 That should cover the basics of inlining traces.
@@ -556,7 +556,7 @@ Now, for the reason why this out of line call is here, we can generate an inlini
 If we look for `TestJIT$Scope::close` in the trace, we find this:
 
 ```text
-                            @ 25   TestJIT$Scope::close (39 bytes)   already compiled into a medium method
+@ 25   TestJIT$Scope::close (39 bytes)   already compiled into a medium method
 ```
 
 Unfortunately, `TestJIT$Scope::close` is not being inlined, which makes our objects escape. Actually, we've just diagnosed
