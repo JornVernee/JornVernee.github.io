@@ -187,7 +187,7 @@ exception handler). This should then allow our object graph to be scalar replace
 
 ## Why is there no uncommon trap?
 
-For 'regular' branches, such as the branches of an `if` statement, JDK 21 profiles these
+For 'regular' branches, such as the branches of an `if` statement, the VM profiles these
 branches by counting how many times a branch is taken. The JIT then uses this count, together
 with the invocation count of the enclosing method, to determine how frequent this branch is
 taken. If a branch is heuristically deemed to be 'rarely' taken, that branch is replaced with
