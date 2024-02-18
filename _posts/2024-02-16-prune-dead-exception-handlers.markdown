@@ -153,8 +153,8 @@ If we look at the exception table, we see that bci 36 is inside an exception han
 all checks out so far.
 
 So, if we look back at our inlining trace, we see that the call to `close` along the normal
-exception-less path is being inlined as expected, but the call to `close` in the exception
-handler is not being inlined due to 'low call site frequency'. If we reference this back
+exception-less path (`@ 22`) is being inlined as expected, but the call to `close` in the exception
+handler (`@ 36`) is not being inlined due to 'low call site frequency'. If we reference this back
 to the escaping allocations, we see that it is this call in the exception handler at bci 36
 into which the object graph escapes:
 
@@ -206,16 +206,17 @@ But, this would slow down the execution of _all_ bytecodes, for something that i
 be 'exceptional', i.e. happen rarely. This doesn't sound like a good deal, and I suspect one
 of the main reasons why profiling of exception handlers wasn't done sooner.
 
-But, when an exception is thrown, we go through an interpreter runtime call to look up the exception
-handler. We can just put the profiling code in that runtime call, under the assumption that
-we only need to look up an exception handler when we are actually going to execute it. That
-is also what we ended up doing: whenever we look up an exception handler, we mark that
-handler as 'entered', and that is our profiling. When C2 parses an exception handler, it
-can now check if that exception handler was ever entered, and if not, insert an uncommon
-trap instead of the exception handler. Besides that, we also need to mark an exception
-handler as entered when we deoptimize through this uncommon trap, so that if an exception
-is thrown after all, we don't try to insert another uncommon trap the next time that the
-code is compiled (since exceptions are evidently a possibility after all).
+But, when an exception is thrown, we go through a runtime call (an out-of-line call to some
+C++ code) to look up the exception handler. We can just put the profiling code in that
+runtime call, under the assumption that we only need to look up an exception handler when
+we are actually going to execute it. That is also what we ended up doing: whenever we look
+up an exception handler, we mark that handler as 'entered', and that is our profiling.
+When C2 parses an exception handler, it can now check if that exception handler was ever
+entered, and if not, insert an uncommon trap instead of the exception handler. Besides
+that, we also need to mark an exception handler as entered when we deoptimize through this
+uncommon trap, so that if an exception is thrown after all, we don't try to insert another
+uncommon trap the next time that the code is compiled (since exceptions are evidently a
+possibility after all).
 
 ## Success!
 
