@@ -490,7 +490,7 @@ For regular Java method calls, we know which target method the call points at:
 ```java
 public static void foo() {}
 
-public static main(String[] args) {
+public static void main(String[] args) {
     foo();
 }
 ```
